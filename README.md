@@ -1,6 +1,10 @@
-# redknife
+<p align="center">
+  <img src="static/logo.svg" alt="redknife logo" width="300">
+</p>
 
-**A Swiss Army knife for offensive pentesting.**
+<p align="center">
+  <strong>A Swiss Army knife for offensive pentesting.</strong>
+</p>
 
 ## Features
 
