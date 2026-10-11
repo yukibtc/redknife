@@ -17,3 +17,16 @@ test:
     cargo test
 
 precommit: fmt check clippy test
+
+# Build the binary for the current machine
+build:
+    cargo build --release --locked
+
+# Compile static Linux binaries
+linux:
+    bash contrib/script/build-linux.sh
+
+# Build all release artifacts
+artifacts: linux
+    bash contrib/script/prepare-artifacts.sh
+    bash contrib/script/sign-artifacts.sh
