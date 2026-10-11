@@ -12,7 +12,9 @@ rust-version = "1.85.0"
 keywords = ["security", "pentesting", "red-team", "cli", "tui"]
 categories = ["command-line-utilities", "network-programming"]
 
-# TODO: rename the binary to a shorter name, like rk?
+[[bin]]
+name = "rk"
+path = "src/main.rs"
 
 [dependencies]
 axum = "0.8.9"

@@ -11,7 +11,7 @@
 Show the available commands and general options:
 
 ```bash
-redknife --help
+rk --help
 ```
 
 ## Disclaimer
