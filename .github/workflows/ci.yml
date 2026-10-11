@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install nightly toolchain
+        run: rustup install nightly
+
+      - name: Add rustfmt for nightly
+        run: rustup component add rustfmt --toolchain nightly
+
+      - name: Check
+        run: cargo +nightly fmt --all --check -- --config format_code_in_doc_comments=true
+
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    env:
+      # Keep the builds within the hosted runner's disk limit.
+      # Debug symbols and incremental artifacts are not needed for CI checks.
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.9.2
+
+      - name: Check
+        run: cargo check
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Test
+        run: cargo test

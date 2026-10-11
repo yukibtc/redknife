@@ -4,11 +4,15 @@
 
 ## Features
 
-Coming soon.
+ - HTTP Callback Server for logging incoming requests
 
 ## Usage
 
-Coming soon.
+Show the available commands and general options:
+
+```bash
+redknife --help
+```
 
 ## Disclaimer
 
