@@ -22,18 +22,19 @@ struct Output {
 
 impl fmt::Display for Output {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f)?;
-
+        writeln!(
+            f,
+            "Received request @ {}",
+            self.now.format("%Y-%m-%d %H:%M:%S")
+        )?;
         writeln!(f, "{} -> {} {}", self.client_ip, self.method, self.uri)?;
-        writeln!(f, "timestamp: {}", self.now.format("%Y-%m-%d %H:%M:%S"))?;
 
         for (name, value) in &self.headers {
             writeln!(f, "{name}: {}", String::from_utf8_lossy(value.as_bytes()))?;
         }
 
         if !self.body.is_empty() {
-            writeln!(f, "\nBODY:")?;
-            write!(f, "{}", String::from_utf8_lossy(&self.body))?;
+            writeln!(f, "\n{}", String::from_utf8_lossy(&self.body))?;
         }
 
         Ok(())
@@ -65,7 +66,7 @@ async fn handle_request(
         body,
     };
 
-    print!("{output}");
+    println!("{output}");
 
     (StatusCode::OK, "OK\n")
 }
@@ -77,8 +78,8 @@ pub async fn run(ip: IpAddr, port: u16) -> io::Result<()> {
 
     let app = Router::new().fallback(handle_request);
 
-    println!("HTTP listener: http://{}/", listener.local_addr()?);
-    println!("Waiting for requests. Ctrl+C to stop.\n");
+    println!("Listening at http://{}/", listener.local_addr()?);
+    println!("Ctrl+C to stop.\n");
 
     axum::serve(
         listener,
