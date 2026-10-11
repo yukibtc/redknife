@@ -7,6 +7,24 @@
 - **HTTP Callback Server**: Receive and log incoming HTTP requests.
 - **HTTP Interceptor**: Intercept, inspect, modify, and forward HTTP requests.
 
+## Install
+
+**Get compiled artifact from releases**
+
+Coming soon.
+
+**Install using cargo from git**
+
+```bash
+cargo install redknife --git https://github.com/yukibtc/redknife
+```
+
+**Install using cargo from crates.io**
+
+```bash
+cargo install redknife
+```
+
 ## Usage
 
 Show the available commands and general options:
@@ -14,6 +32,10 @@ Show the available commands and general options:
 ```bash
 rk --help
 ```
+
+## Changelog
+
+All notable changes are documented in the [CHANGELOG.md](CHANGELOG.md).
 
 ## Disclaimer
 
