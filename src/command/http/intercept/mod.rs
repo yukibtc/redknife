@@ -1,0 +1,38 @@
+use std::io;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
+
+mod app;
+mod handler;
+mod messages;
+mod tui;
+mod ui;
+
+use self::handler::InterceptHandler;
+use crate::proxy::http_forward_server::HttpForwardProxyServer;
+
+pub async fn run(ip: IpAddr, port: u16) -> io::Result<()> {
+    let addr: SocketAddr = SocketAddr::new(ip, port);
+
+    let listener: TcpListener = TcpListener::bind(addr).await?;
+    let local_addr: SocketAddr = listener.local_addr()?;
+
+    let (sender, receiver) = mpsc::channel(4096);
+
+    let handler = Arc::new(InterceptHandler::new(sender));
+    let proxy = HttpForwardProxyServer::new(listener, handler);
+
+    tokio::select! {
+        res = proxy.run() => {
+            res?;
+        }
+        res = tui::run(receiver, local_addr) => {
+            res?;
+        }
+    }
+
+    Ok(())
+}

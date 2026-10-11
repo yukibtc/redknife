@@ -4,7 +4,8 @@
 
 ## Features
 
- - HTTP Callback Server for logging incoming requests
+- **HTTP Callback Server**: Receive and log incoming HTTP requests.
+- **HTTP Interceptor**: Intercept, inspect, modify, and forward HTTP requests.
 
 ## Usage
 

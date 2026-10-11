@@ -4,6 +4,8 @@ use clap::Parser;
 
 mod cli;
 mod command;
+mod http;
+mod proxy;
 
 use self::cli::{Cli, Command, HttpCommand};
 
@@ -13,6 +15,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         Command::Http { command } => match command {
             HttpCommand::Callback { ip, port } => command::http::callback::run(ip, port).await?,
+            HttpCommand::Intercept { ip, port } => command::http::intercept::run(ip, port).await?,
         },
     }
 
