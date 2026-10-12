@@ -23,12 +23,14 @@ bytes = "1.12.1"
 chrono = "0.4.45"
 clap = { version =  "4.6.7", features = ["derive"] }
 crossterm = "0.28"
+hex = "0.4.3"
 http = "1.5.0"
 http-body-util = "0.1.5"
 httparse = "1.10.1"
 hyper = { version = "1.12.0", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio", "client-legacy", "http1"] }
 ratatui = "0.29"
+sha1 = "0.11.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
 tui-textarea = "0.7"

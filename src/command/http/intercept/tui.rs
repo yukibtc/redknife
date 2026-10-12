@@ -7,11 +7,13 @@ use std::{fs, io};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
+use sha1::digest::Output;
+use sha1::{Digest, Sha1};
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
 
-use super::app::{App, Focus, QueuedRequest, RequestAction};
+use super::app::{App, Focus, RequestAction};
 use super::ui;
 use crate::command::http::intercept::app::Status;
 use crate::command::http::intercept::messages::PendingRequest;
@@ -202,19 +204,23 @@ fn save_selected(app: &mut App) {
         return;
     };
 
-    let filename: String = format!("request-{}.txt", selected.pending.id);
+    let content: Vec<u8> = selected.bytes();
+
+    // Hash the content, so we'll have a stable req identifier
+    let mut hasher: Sha1 = Sha1::new();
+    hasher.update(&content);
+    let hash: Output<Sha1> = hasher.finalize();
+
+    // Use the deterministic content hash as the filename
+    let filename: String = format!("req-{}.txt", hex::encode(hash.as_slice()));
     let path: &Path = Path::new(&filename);
 
-    app.status = match save_request(selected, path) {
+    app.status = match fs::write(path, &content) {
         Ok(()) => Status::FileSaved { filename },
         Err(err) => Status::FileSaveError {
             error: err.to_string(),
         },
     };
-}
-
-fn save_request(selected: &QueuedRequest, path: &Path) -> io::Result<()> {
-    fs::write(path, selected.bytes())
 }
 
 #[cfg(test)]
@@ -228,7 +234,7 @@ mod tests {
     use tokio::sync::oneshot;
     use tui_textarea::TextArea;
 
-    use super::{App, Focus, PendingRequest, handle_key, save_request};
+    use super::{App, Focus, PendingRequest, handle_key};
     use crate::command::http::intercept::messages::InterceptReply;
 
     fn app_with_queued_request(body: &'static [u8]) -> (App, oneshot::Receiver<InterceptReply>) {
@@ -324,7 +330,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("binary-request.txt");
 
-        save_request(selected, &path).expect("binary request must be saved");
+        fs::write(&path, selected.bytes()).expect("binary request must be saved");
 
         let saved = fs::read(&path).expect("saved request must be readable");
         assert_eq!(
@@ -343,7 +349,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("edited-draft.txt");
 
-        save_request(selected, &path).expect("edited draft must be saved");
+        fs::write(&path, selected.bytes()).expect("edited draft must be saved");
 
         let saved = fs::read(&path).expect("saved draft must be readable");
         assert_eq!(saved, b"POST /draft HTTP/1.1\r\n\r\nchanged\n\n");
