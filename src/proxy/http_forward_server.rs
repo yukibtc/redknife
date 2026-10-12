@@ -1,4 +1,5 @@
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -34,16 +35,15 @@ enum InnerError {
     ExpectedOriginForm,
 }
 
-#[async_trait::async_trait]
 pub trait HttpForwardProxyServerRequestHandler: Send + Sync {
     /// Receive an origin-form request without hop-by-hop headers.
     /// The original URI is separate metadata; its upstream destination stays fixed.
     /// Return the request to forward, or `None` to drop it.
-    async fn handle(
-        &self,
+    fn handle<'a>(
+        &'a self,
         original_uri: Uri,
         req: Request<ProxyBody>,
-    ) -> Option<Request<ProxyBody>>;
+    ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>>;
 }
 
 pub struct HttpForwardProxyServer {
@@ -219,14 +219,13 @@ mod tests {
         drop: bool,
     }
 
-    #[async_trait::async_trait]
     impl HttpForwardProxyServerRequestHandler for FixedAction {
-        async fn handle(
-            &self,
+        fn handle<'a>(
+            &'a self,
             _original_uri: Uri,
             req: Request<ProxyBody>,
-        ) -> Option<Request<ProxyBody>> {
-            if self.drop { None } else { Some(req) }
+        ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>> {
+            Box::pin(async move { if self.drop { None } else { Some(req) } })
         }
     }
 
@@ -234,15 +233,16 @@ mod tests {
         target: Uri,
     }
 
-    #[async_trait::async_trait]
     impl HttpForwardProxyServerRequestHandler for EditTarget {
-        async fn handle(
-            &self,
+        fn handle<'a>(
+            &'a self,
             _original_uri: Uri,
             mut req: Request<ProxyBody>,
-        ) -> Option<Request<ProxyBody>> {
-            *req.uri_mut() = self.target.clone();
-            Some(req)
+        ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>> {
+            Box::pin(async move {
+                *req.uri_mut() = self.target.clone();
+                Some(req)
+            })
         }
     }
 

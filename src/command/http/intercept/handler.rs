@@ -1,3 +1,4 @@
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
@@ -27,51 +28,52 @@ impl InterceptHandler {
     }
 }
 
-#[async_trait::async_trait]
 impl HttpForwardProxyServerRequestHandler for InterceptHandler {
-    async fn handle(
-        &self,
+    fn handle<'a>(
+        &'a self,
         original_uri: Uri,
-        request: Request<ProxyBody>,
-    ) -> Option<Request<ProxyBody>> {
-        // Reserve capacity before reading a potentially large or slow body.
-        let permit: Permit<PendingRequest> = self.sender.try_reserve().ok()?;
+        req: Request<ProxyBody>,
+    ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>> {
+        Box::pin(async move {
+            // Reserve capacity before reading a potentially large or slow body.
+            let permit: Permit<PendingRequest> = self.sender.try_reserve().ok()?;
 
-        let timestamp: DateTime<Local> = Local::now();
+            let timestamp: DateTime<Local> = Local::now();
 
-        let (parts, body) = request.into_parts();
+            let (parts, body) = req.into_parts();
 
-        let collected: Bytes = tokio::select! {
-            result = Limited::new(body, MAX_BODY_SIZE).collect() => result.ok()?.to_bytes(),
-            _ = self.sender.closed() => return None,
-        };
+            let collected: Bytes = tokio::select! {
+                result = Limited::new(body, MAX_BODY_SIZE).collect() => result.ok()?.to_bytes(),
+                _ = self.sender.closed() => return None,
+            };
 
-        let mut buffered: Request<Bytes> = Request::from_parts(parts, collected);
+            let mut buffered: Request<Bytes> = Request::from_parts(parts, collected);
 
-        normalize_body_headers(&mut buffered);
+            normalize_body_headers(&mut buffered);
 
-        let (reply, receiver) = oneshot::channel();
+            let (reply, receiver) = oneshot::channel();
 
-        let id: u64 = self.ids.fetch_add(1, Ordering::Relaxed);
+            let id: u64 = self.ids.fetch_add(1, Ordering::Relaxed);
 
-        let pending = PendingRequest {
-            id,
-            timestamp,
-            original_uri,
-            request: buffered,
-            reply,
-        };
+            let pending = PendingRequest {
+                id,
+                timestamp,
+                original_uri,
+                request: buffered,
+                reply,
+            };
 
-        permit.send(pending);
+            permit.send(pending);
 
-        // If the UI is closed or the oneshot is canceled, fail closed.
-        match receiver.await.ok()? {
-            InterceptReply::Forward(mut edited) => {
-                normalize_body_headers(&mut edited);
-                Some(edited.map(|body| Full::new(body).map_err(|never| match never {}).boxed()))
+            // If the UI is closed or the oneshot is canceled, fail closed.
+            match receiver.await.ok()? {
+                InterceptReply::Forward(mut edited) => {
+                    normalize_body_headers(&mut edited);
+                    Some(edited.map(|body| Full::new(body).map_err(|never| match never {}).boxed()))
+                }
+                InterceptReply::Drop => None,
             }
-            InterceptReply::Drop => None,
-        }
+        })
     }
 }
 
