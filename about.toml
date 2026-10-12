@@ -1,0 +1,10 @@
+# Prefer MIT when a dependency offers a choice of licenses.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+ignore-dev-dependencies = true

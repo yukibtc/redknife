@@ -15,21 +15,20 @@
 
 **Get compiled artifact from releases**
 
-Download the binary from [GitHub Releases](https://github.com/yukibtc/redknife/releases).
+Download the archive for your architecture from [GitHub Releases](https://github.com/yukibtc/redknife/releases).
 
-Optionally, before renaming the binary, verify its signature and checksum. Download `SHA256SUMS`
-and `SHA256SUMS.asc` from the same release into the same directory and import the signing key
-listed in [SECURITY.md](SECURITY.md):
+Optionally, before extracting the archive, verify its signature and checksum. 
+Download `SHA256SUMS` and `SHA256SUMS.asc` from the same release into the same directory and import the signing key listed in [SECURITY.md](SECURITY.md):
 
 ```bash
 gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-Rename the binary to `rk` and run it:
+Extract the downloaded archive and run `rk`:
 
 ```bash
-chmod +x rk
+tar -xzf rk-<version>-<target>.tar.gz
 ./rk --help
 ```
 
@@ -37,6 +36,12 @@ Optionally, install `rk` system-wide to run it from any directory (requires `sud
 
 ```bash
 sudo install -m 755 rk /usr/local/bin/rk
+```
+
+or user-wide (ensure `~/.local/bin` is in your `PATH`):
+
+```bash
+install -m 755 rk ~/.local/bin/rk
 ```
 
 **Install using cargo from git**

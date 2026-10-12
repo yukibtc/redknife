@@ -33,5 +33,6 @@ linux:
 
 # Build all release artifacts
 artifacts: linux
+    bash contrib/script/generate-licenses.sh
     bash contrib/script/prepare-artifacts.sh
     bash contrib/script/sign-artifacts.sh
