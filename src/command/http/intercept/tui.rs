@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -58,16 +58,21 @@ impl StopKeyboard {
 }
 
 /// Run one persistent UI while proxy tasks enqueue pending requests.
-pub async fn run(mut receiver: mpsc::Receiver<PendingRequest>, addr: SocketAddr) -> io::Result<()> {
+pub async fn run(
+    mut receiver: mpsc::Receiver<PendingRequest>,
+    addr: SocketAddr,
+    out_dir: Option<PathBuf>,
+) -> io::Result<()> {
     let mut terminal: DefaultTerminal = ratatui::init();
     let _restore = RestoreTerminal;
-    event_loop(&mut terminal, &mut receiver, addr).await
+    event_loop(&mut terminal, &mut receiver, addr, out_dir).await
 }
 
 async fn event_loop(
     terminal: &mut DefaultTerminal,
     receiver: &mut mpsc::Receiver<PendingRequest>,
     address: SocketAddr,
+    out_dir: Option<PathBuf>,
 ) -> io::Result<()> {
     let mut app: App = App::new();
 
@@ -114,7 +119,7 @@ async fn event_loop(
                 }
                 event = input_receiver.recv() => {
                     match event {
-                        Some(InputEvent::Key(key)) => handle_key(&mut app, key),
+                        Some(InputEvent::Key(key)) => handle_key(&mut app, out_dir.as_ref(), key),
                         Some(InputEvent::Resize) => {}, // Next iteration redraws.
                         None => return Err(io::Error::other("Keyboard reader stopped")),
                     }
@@ -137,7 +142,7 @@ async fn event_loop(
     result
 }
 
-fn handle_key(app: &mut App, key: KeyEvent) {
+fn handle_key(app: &mut App, out_dir: Option<&PathBuf>, key: KeyEvent) {
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
             KeyCode::Char('q') => {
@@ -145,7 +150,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 return;
             }
             KeyCode::Char('s') => {
-                save_selected(app);
+                save_selected(app, out_dir);
                 return;
             }
             _ => {}
@@ -198,7 +203,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-fn save_selected(app: &mut App) {
+fn save_selected(app: &mut App, out_dir: Option<&PathBuf>) {
     let Some(selected) = app.current() else {
         app.status = Status::NoRequestSelected;
         return;
@@ -213,9 +218,12 @@ fn save_selected(app: &mut App) {
 
     // Use the deterministic content hash as the filename
     let filename: String = format!("req-{}.txt", hex::encode(hash.as_slice()));
-    let path: &Path = Path::new(&filename);
+    let path: PathBuf = match out_dir {
+        Some(out_dir) => out_dir.join(&filename),
+        None => PathBuf::from(&filename),
+    };
 
-    app.status = match fs::write(path, &content) {
+    app.status = match fs::write(&path, &content) {
         Ok(()) => Status::FileSaved { filename },
         Err(err) => Status::FileSaveError {
             error: err.to_string(),
@@ -271,7 +279,11 @@ mod tests {
             "",
         ]);
 
-        handle_key(&mut app, KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
+        handle_key(
+            &mut app,
+            None,
+            KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE),
+        );
 
         assert!(
             app.queue.is_empty(),
@@ -303,7 +315,11 @@ mod tests {
             "",
         ]);
 
-        handle_key(&mut app, KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
+        handle_key(
+            &mut app,
+            None,
+            KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE),
+        );
 
         assert!(
             app.queue.is_empty(),

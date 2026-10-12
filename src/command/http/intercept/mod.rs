@@ -1,5 +1,6 @@
 use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
@@ -14,7 +15,7 @@ mod ui;
 use self::handler::InterceptHandler;
 use crate::proxy::http_forward_server::HttpForwardProxyServer;
 
-pub async fn run(ip: IpAddr, port: u16) -> io::Result<()> {
+pub async fn run(ip: IpAddr, port: u16, out_dir: Option<PathBuf>) -> io::Result<()> {
     let addr: SocketAddr = SocketAddr::new(ip, port);
 
     let listener: TcpListener = TcpListener::bind(addr).await?;
@@ -29,7 +30,7 @@ pub async fn run(ip: IpAddr, port: u16) -> io::Result<()> {
         res = proxy.run() => {
             res?;
         }
-        res = tui::run(receiver, local_addr) => {
+        res = tui::run(receiver, local_addr, out_dir) => {
             res?;
         }
     }

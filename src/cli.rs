@@ -1,4 +1,5 @@
 use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
@@ -44,5 +45,8 @@ pub enum HttpCommand {
         /// Local port to listen on
         #[arg(long, default_value_t = 8001)]
         port: u16,
+        /// Directory for manually saved HTTP requests (defaults to the current directory).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
     },
 }
