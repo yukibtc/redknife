@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use crate::http::target::HttpTarget;
+
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
@@ -48,5 +50,17 @@ pub enum HttpCommand {
         /// Directory for manually saved HTTP requests (defaults to the current directory).
         #[arg(long)]
         out_dir: Option<PathBuf>,
+    },
+    /// Repeat a saved HTTP request
+    #[command(arg_required_else_help = true)]
+    Repeat {
+        /// Target URL
+        target: HttpTarget,
+        // TODO: make this optional when we'll have a TUI for the repeater; None will mean open the TUI editor
+        /// Path to a saved HTTP request to repeat
+        file: PathBuf,
+        /// Save response headers and decoded body to this path instead of stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }

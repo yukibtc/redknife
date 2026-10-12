@@ -18,6 +18,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             HttpCommand::Intercept { ip, port, out_dir } => {
                 command::http::intercept::run(ip, port, out_dir).await?
             }
+            HttpCommand::Repeat {
+                target,
+                file,
+                output,
+            } => command::http::repeat::run(target, file, output).await?,
         },
     }
 

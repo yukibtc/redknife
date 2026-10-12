@@ -10,6 +10,7 @@
 
 - **HTTP Callback Server**: Receive and log incoming HTTP requests.
 - **HTTP Interceptor**: Intercept, inspect, modify, and forward HTTP requests.
+- **HTTP Repeater**: Replay request over HTTP or HTTPS.
 
 ## Install
 
