@@ -51,12 +51,6 @@ install -m 755 rk ~/.local/bin/rk
 cargo install redknife --git https://github.com/yukibtc/redknife
 ```
 
-**Install using cargo from crates.io**
-
-```bash
-cargo install redknife
-```
-
 ## Usage
 
 Show the available commands and general options:
