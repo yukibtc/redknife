@@ -16,7 +16,11 @@ clippy:
 test:
     cargo test
 
-precommit: fmt check clippy test
+deny:
+    cargo deny check advisories
+    cargo deny check licenses
+
+precommit: fmt check clippy test deny
 
 # Build the binary for the current machine
 build:
