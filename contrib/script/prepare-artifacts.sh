@@ -9,7 +9,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}/../.."
 
 version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
-artifact_dir="dist/$version"
+
+# Keep staging cleanup valid after changing into the artifact directory.
+artifact_dir="$PWD/dist/$version"
 
 test -s dist/THIRD_PARTY_LICENSES.txt
 test -s LICENSE
