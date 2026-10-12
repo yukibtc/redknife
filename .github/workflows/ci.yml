@@ -48,31 +48,31 @@ jobs:
       - name: Test
         run: cargo test
 
-cargo-deny:
-  name: Cargo deny
-  runs-on: ubuntu-latest
-  env:
-    CARGO_DENY_VERSION: 0.20.2
-  steps:
-    - name: Checkout
-      uses: actions/checkout@v7
+  cargo-deny:
+    name: Cargo deny
+    runs-on: ubuntu-latest
+    env:
+      CARGO_DENY_VERSION: 0.20.2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
-    - name: Install Rust
-      run: rustup update stable && rustup default stable
+      - name: Install Rust
+        run: rustup update stable && rustup default stable
 
-    - uses: actions/cache@v6
-      with:
-        path: ${{ runner.tool_cache }}/cargo-deny
-        key: cargo-deny-bin-${{ env.CARGO_DENY_VERSION }}
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.tool_cache }}/cargo-deny
+          key: cargo-deny-bin-${{ env.CARGO_DENY_VERSION }}
 
-    - name: Add the tool cache directory to the search path
-      run: echo "${{ runner.tool_cache }}/cargo-deny/bin" >> $GITHUB_PATH
+      - name: Add the tool cache directory to the search path
+        run: echo "${{ runner.tool_cache }}/cargo-deny/bin" >> $GITHUB_PATH
 
-    - name: Ensure that the tool cache is populated with the cargo-deny binary
-      run: cargo +stable install --root ${{ runner.tool_cache }}/cargo-deny --version ${{ env.CARGO_DENY_VERSION }} cargo-deny
+      - name: Ensure that the tool cache is populated with the cargo-deny binary
+        run: cargo +stable install --root ${{ runner.tool_cache }}/cargo-deny --version ${{ env.CARGO_DENY_VERSION }} cargo-deny
 
-    - name: Check advisories
-      run: cargo deny check advisories
+      - name: Check advisories
+        run: cargo deny check advisories
 
-    - name: Check licenses
-      run: cargo deny check licenses
+      - name: Check licenses
+        run: cargo deny check licenses
