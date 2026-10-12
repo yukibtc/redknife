@@ -2,7 +2,7 @@
 name = "redknife"
 version = "0.1.0"
 edition = "2024"
-description = "A Swiss Army knife for offensive pentesting."
+description = "A Swiss Army knife for offensive security."
 authors = ["Yuki Kishimoto <yukikishimoto@protonmail.com>"]
 homepage = "https://github.com/yukibtc/redknife"
 repository = "https://github.com/yukibtc/redknife.git"

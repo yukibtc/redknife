@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>A Swiss Army knife for offensive pentesting.</strong>
+  <strong>A Swiss Army knife for offensive security.</strong>
 </p>
 
 ## Features
