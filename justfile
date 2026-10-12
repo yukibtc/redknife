@@ -28,7 +28,8 @@ build:
 
 # Compile static Linux binaries
 linux:
-    bash contrib/script/build-linux.sh
+    cargo build --release --locked --target x86_64-unknown-linux-musl
+    cargo build --release --locked --target aarch64-unknown-linux-musl
 
 # Build all release artifacts
 artifacts: linux

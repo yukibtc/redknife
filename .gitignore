@@ -1,8 +1,5 @@
 # Rust
 /target
 
-# Python
-/.venv
-
 # Release artifacts
 /dist
