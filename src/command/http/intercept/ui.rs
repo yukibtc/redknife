@@ -117,7 +117,7 @@ fn render_queue(frame: &mut Frame, area: Rect, app: &mut App) {
                     req.timestamp,
                     req.request.method()
                 )),
-                Line::from(format!("  {}", req.request.uri())),
+                Line::from(format!("  {}", req.original_uri)),
             ])
         })
         .collect();

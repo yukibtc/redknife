@@ -109,11 +109,18 @@ impl QueuedRequest {
 
     fn forward_request(&self) -> Result<Request<Bytes>, HttpWireRequestError> {
         let raw: Vec<u8> = self.bytes();
-        if raw == self.original_bytes {
-            Ok(self.pending.request.clone())
+
+        let request: Request<Bytes> = if raw == self.original_bytes {
+            self.pending.request.clone()
         } else {
-            parse_request(&raw)
+            parse_request(&raw)?
+        };
+
+        if request.uri().scheme().is_some() || request.uri().authority().is_some() {
+            return Err(HttpWireRequestError::ExpectedOriginForm);
         }
+
+        Ok(request)
     }
 }
 
@@ -367,6 +374,7 @@ mod tests {
 
     use super::{App, QueuedRequest, RequestAction, Status};
     use crate::command::http::intercept::messages::{InterceptReply, PendingRequest};
+    use crate::http::request::HttpWireRequestError;
 
     fn pending_request(
         id: u64,
@@ -375,7 +383,7 @@ mod tests {
         let (reply, receiver) = oneshot::channel();
         let request = Request::builder()
             .method("POST")
-            .uri(format!("http://example.com/{id}"))
+            .uri(format!("/{id}"))
             .header(CONTENT_LENGTH, body.len())
             .body(Bytes::from_static(body))
             .expect("test request must be valid");
@@ -383,6 +391,7 @@ mod tests {
             PendingRequest {
                 id,
                 timestamp: Local::now(),
+                original_uri: format!("http://example.com/{id}").parse().unwrap(),
                 request,
                 reply,
             },
@@ -396,12 +405,7 @@ mod tests {
         let mut request = QueuedRequest::new(pending).expect("request must be queued");
         let original_bytes = request.bytes();
 
-        request.editor = TextArea::from([
-            "PATCH http://example.com/1 HTTP/1.1",
-            "content-length: 0",
-            "",
-            "",
-        ]);
+        request.editor = TextArea::from(["PATCH /1 HTTP/1.1", "content-length: 0", "", ""]);
         let edited_bytes = request.bytes();
         let forwarded = request
             .forward_request()
@@ -410,11 +414,11 @@ mod tests {
         assert!(request.editable);
         assert_eq!(
             original_bytes,
-            b"POST http://example.com/1 HTTP/1.1\r\ncontent-length: 0\r\n\r\n"
+            b"POST /1 HTTP/1.1\r\ncontent-length: 0\r\n\r\n"
         );
         assert_eq!(
             edited_bytes,
-            b"PATCH http://example.com/1 HTTP/1.1\r\ncontent-length: 0\r\n\r\n"
+            b"PATCH /1 HTTP/1.1\r\ncontent-length: 0\r\n\r\n"
         );
         assert_eq!(forwarded.method(), "PATCH");
         assert_eq!(forwarded.body(), b"".as_slice());
@@ -427,7 +431,7 @@ mod tests {
         let original_bytes = request.bytes();
 
         request.editor = TextArea::from([
-            "PATCH http://example.com/1 HTTP/1.1",
+            "PATCH /1 HTTP/1.1",
             "content-length: 12",
             "",
             "first",
@@ -443,11 +447,11 @@ mod tests {
         assert!(request.editable);
         assert_eq!(
             original_bytes,
-            b"POST http://example.com/1 HTTP/1.1\r\ncontent-length: 12\r\n\r\nfirst\nlast\n\n"
+            b"POST /1 HTTP/1.1\r\ncontent-length: 12\r\n\r\nfirst\nlast\n\n"
         );
         assert_eq!(
             edited_bytes,
-            b"PATCH http://example.com/1 HTTP/1.1\r\ncontent-length: 12\r\n\r\nfirst\nlast\n\n"
+            b"PATCH /1 HTTP/1.1\r\ncontent-length: 12\r\n\r\nfirst\nlast\n\n"
         );
         assert_eq!(forwarded.method(), "PATCH");
         assert_eq!(forwarded.body(), b"first\nlast\n\n".as_slice());
@@ -460,7 +464,7 @@ mod tests {
         let original_bytes = request.bytes();
 
         request.editor = TextArea::from([
-            "PATCH http://example.com/1 HTTP/1.1",
+            "PATCH /1 HTTP/1.1",
             "content-length: 15",
             "",
             "first",
@@ -474,8 +478,14 @@ mod tests {
             .expect("edited request must parse");
 
         assert!(request.editable);
-        assert_eq!(original_bytes, b"POST http://example.com/1 HTTP/1.1\r\ncontent-length: 15\r\n\r\nfirst\r\nlast\r\n\r\n");
-        assert_eq!(edited_bytes, b"PATCH http://example.com/1 HTTP/1.1\r\ncontent-length: 15\r\n\r\nfirst\r\nlast\r\n\r\n");
+        assert_eq!(
+            original_bytes,
+            b"POST /1 HTTP/1.1\r\ncontent-length: 15\r\n\r\nfirst\r\nlast\r\n\r\n"
+        );
+        assert_eq!(
+            edited_bytes,
+            b"PATCH /1 HTTP/1.1\r\ncontent-length: 15\r\n\r\nfirst\r\nlast\r\n\r\n"
+        );
         assert_eq!(forwarded.method(), "PATCH");
         assert_eq!(forwarded.body(), b"first\r\nlast\r\n\r\n".as_slice());
     }
@@ -502,7 +512,7 @@ mod tests {
         );
         assert_eq!(
             saved_bytes,
-            b"POST http://example.com/1 HTTP/1.1\r\ncontent-length: 7\r\n\r\n\x00\xff\x1b[31m"
+            b"POST /1 HTTP/1.1\r\ncontent-length: 7\r\n\r\n\x00\xff\x1b[31m"
         );
         assert_eq!(forwarded.body(), b"\x00\xff\x1b[31m".as_slice());
     }
@@ -527,7 +537,10 @@ mod tests {
                 .all(|line| line.chars().all(|ch| !ch.is_control())),
             "terminal control sequences must not reach the text display"
         );
-        assert_eq!(saved_bytes, b"POST http://example.com/1 HTTP/1.1\r\ncontent-length: 25\r\n\r\nvalid utf8\x1b]52;c;payload\x07");
+        assert_eq!(
+            saved_bytes,
+            b"POST /1 HTTP/1.1\r\ncontent-length: 25\r\n\r\nvalid utf8\x1b]52;c;payload\x07"
+        );
         assert_eq!(
             forwarded.body(),
             b"valid utf8\x1b]52;c;payload\x07".as_slice()
@@ -556,7 +569,7 @@ mod tests {
         );
         assert_eq!(
             saved_bytes,
-            b"POST http://example.com/1 HTTP/1.1\r\ncontent-length: 16\r\n\r\nmixed\r\nnewlines\n"
+            b"POST /1 HTTP/1.1\r\ncontent-length: 16\r\n\r\nmixed\r\nnewlines\n"
         );
         assert_eq!(forwarded.body(), b"mixed\r\nnewlines\n".as_slice());
     }
@@ -571,7 +584,7 @@ mod tests {
         app.push(invalid_pending);
         app.push(unchanged_pending);
         app.queue[0].editor = TextArea::from([
-            "PATCH http://example.com/edited HTTP/1.1",
+            "PATCH /edited HTTP/1.1",
             "Content-Length: 4",
             "",
             "longer body",
@@ -611,7 +624,7 @@ mod tests {
             panic!("valid edited request must receive Forward");
         };
         assert_eq!(edited_request.method(), "PATCH");
-        assert_eq!(edited_request.uri(), "http://example.com/edited");
+        assert_eq!(edited_request.uri(), "/edited");
         assert_eq!(edited_request.body(), b"longer body\n".as_slice());
         // App preserves the draft's stale length; InterceptHandler normalizes it.
         assert_eq!(edited_request.headers()[CONTENT_LENGTH], "4");
@@ -631,7 +644,7 @@ mod tests {
             panic!("unchanged request must receive Forward");
         };
         assert_eq!(unchanged_request.method(), "POST");
-        assert_eq!(unchanged_request.uri(), "http://example.com/3");
+        assert_eq!(unchanged_request.uri(), "/3");
         assert_eq!(unchanged_request.headers()[CONTENT_LENGTH], "4");
         assert_eq!(unchanged_request.body(), b"ping".as_slice());
     }
@@ -689,6 +702,138 @@ mod tests {
             matches!(replies.try_recv(), Err(oneshot::error::TryRecvError::Empty)),
             "invalid request must keep waiting for a decision"
         );
+    }
+
+    fn app_with_draft(request_line: &str) -> (App, oneshot::Receiver<InterceptReply>) {
+        let (pending, replies) = pending_request(1, b"");
+        let mut app = App::new();
+        app.push(pending);
+        app.current_mut().unwrap().editor = TextArea::from([request_line, "", ""]);
+        (app, replies)
+    }
+
+    #[test]
+    fn absolute_url_is_rejected_even_when_it_matches_the_original_destination() {
+        let (app, _replies) = app_with_draft("GET http://example.com/1 HTTP/1.1");
+
+        let result = app.current().unwrap().forward_request();
+
+        assert!(matches!(
+            result,
+            Err(HttpWireRequestError::ExpectedOriginForm)
+        ));
+    }
+
+    #[test]
+    fn absolute_url_cannot_redirect_to_another_http_destination() {
+        let (app, _replies) = app_with_draft("GET http://elsewhere.example/edited HTTP/1.1");
+
+        let result = app.current().unwrap().forward_request();
+
+        assert!(matches!(
+            result,
+            Err(HttpWireRequestError::ExpectedOriginForm)
+        ));
+    }
+
+    #[test]
+    fn absolute_url_cannot_redirect_to_an_https_destination() {
+        let (app, _replies) = app_with_draft("GET https://elsewhere.example/edited HTTP/1.1");
+
+        let result = app.current().unwrap().forward_request();
+
+        assert!(matches!(
+            result,
+            Err(HttpWireRequestError::ExpectedOriginForm)
+        ));
+    }
+
+    #[test]
+    fn authority_without_a_scheme_is_rejected() {
+        let (app, _replies) = app_with_draft("GET elsewhere.example:8080 HTTP/1.1");
+
+        let result = app.current().unwrap().forward_request();
+
+        assert!(matches!(
+            result,
+            Err(HttpWireRequestError::ExpectedOriginForm)
+        ));
+    }
+
+    #[test]
+    fn forwarding_an_absolute_url_shows_an_error_and_keeps_the_draft() {
+        let (mut app, mut replies) = app_with_draft("GET http://elsewhere.example/edited HTTP/1.1");
+        let original_url = app.current().unwrap().pending.original_uri.clone();
+        let draft = app.current().unwrap().bytes();
+
+        let resolved = app.resolve_selected(RequestAction::Forward);
+
+        assert_eq!(resolved, None);
+        assert_eq!(app.queue.len(), 1);
+        assert_eq!(app.selection.selected(), Some(0));
+        assert_eq!(app.current().unwrap().pending.original_uri, original_url);
+        assert_eq!(app.current().unwrap().bytes(), draft);
+        assert!(matches!(
+            replies.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        let Status::RequestError { id, error } = &app.status else {
+            panic!("Forward should report a request error");
+        };
+        assert_eq!(*id, 1);
+        assert_eq!(
+            error,
+            "Expected a path such as /login?q=1; interceptor destination is fixed"
+        );
+    }
+
+    #[test]
+    fn forward_all_leaves_an_absolute_url_pending() {
+        let (mut app, mut replies) = app_with_draft("GET http://elsewhere.example/edited HTTP/1.1");
+        let draft = app.current().unwrap().bytes();
+
+        let forwarded = app.resolve_all(RequestAction::Forward);
+
+        assert_eq!(forwarded, 0);
+        assert_eq!(app.queue.len(), 1);
+        assert_eq!(app.current().unwrap().bytes(), draft);
+        assert!(matches!(
+            app.status,
+            Status::ResolvedAll {
+                count: 0,
+                failed: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            replies.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn an_absolute_url_draft_can_still_be_dropped() {
+        let (mut app, mut replies) = app_with_draft("GET http://elsewhere.example/edited HTTP/1.1");
+
+        let resolved = app.resolve_selected(RequestAction::Drop);
+
+        assert_eq!(resolved, Some(1));
+        assert!(app.queue.is_empty());
+        assert!(matches!(replies.try_recv().unwrap(), InterceptReply::Drop));
+    }
+
+    #[test]
+    fn options_asterisk_can_be_forwarded() {
+        let (mut app, mut replies) = app_with_draft("OPTIONS * HTTP/1.1");
+
+        let resolved = app.resolve_selected(RequestAction::Forward);
+
+        assert_eq!(resolved, Some(1));
+        let InterceptReply::Forward(request) = replies.try_recv().unwrap() else {
+            panic!("OPTIONS * should be forwarded");
+        };
+        assert_eq!(request.method(), "OPTIONS");
+        assert_eq!(request.uri(), "*");
     }
 
     #[test]

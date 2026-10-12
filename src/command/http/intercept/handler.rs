@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use chrono::{DateTime, Local};
-use http::Request;
+use http::{Request, Uri};
 use http_body_util::{BodyExt, Full, Limited};
 use tokio::sync::mpsc::Permit;
 use tokio::sync::{mpsc, oneshot};
@@ -29,7 +29,11 @@ impl InterceptHandler {
 
 #[async_trait::async_trait]
 impl HttpForwardProxyServerRequestHandler for InterceptHandler {
-    async fn handle(&self, request: Request<ProxyBody>) -> Option<Request<ProxyBody>> {
+    async fn handle(
+        &self,
+        original_uri: Uri,
+        request: Request<ProxyBody>,
+    ) -> Option<Request<ProxyBody>> {
         // Reserve capacity before reading a potentially large or slow body.
         let permit: Permit<PendingRequest> = self.sender.try_reserve().ok()?;
 
@@ -53,6 +57,7 @@ impl HttpForwardProxyServerRequestHandler for InterceptHandler {
         let pending = PendingRequest {
             id,
             timestamp,
+            original_uri,
             request: buffered,
             reply,
         };
@@ -72,30 +77,43 @@ impl HttpForwardProxyServerRequestHandler for InterceptHandler {
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
     use std::pin::Pin;
+    use std::sync::Arc;
     use std::task::{Context, Poll};
     use std::time::Duration;
 
     use bytes::Bytes;
-    use http::Request;
+    use http::{Request, Response, Uri};
     use http_body_util::{BodyExt, Full};
-    use hyper::body::{Body, Frame};
+    use hyper::body::{Body, Frame, Incoming};
+    use hyper::service::service_fn;
+    use hyper_util::rt::TokioIo;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::{mpsc, oneshot};
+    use tokio::task::{AbortHandle, JoinHandle};
     use tokio::time::timeout;
 
     use super::{InterceptHandler, MAX_BODY_SIZE};
-    use crate::command::http::intercept::messages::InterceptReply;
-    use crate::proxy::http_forward_server::{HttpForwardProxyServerRequestHandler, ProxyBody};
+    use crate::command::http::intercept::messages::{InterceptReply, PendingRequest};
+    use crate::proxy::http_forward_server::{
+        HttpForwardProxyServer, HttpForwardProxyServerRequestHandler, ProxyBody,
+    };
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
     fn buffered_request(body: Bytes) -> Request<ProxyBody> {
         Request::builder()
             .method("POST")
-            .uri("http://example.com/original")
+            .uri("/original")
             .header("content-length", body.len())
             .body(Full::new(body).map_err(|never| match never {}).boxed())
             .expect("test request must be valid")
+    }
+
+    fn original_uri() -> Uri {
+        "http://example.com/original".parse().unwrap()
     }
 
     // Signals its first read, then stays pending so the test controls cancellation.
@@ -118,114 +136,386 @@ mod tests {
         }
     }
 
+    // One proxy, one destination, and one client request per test.
+    struct TestProxy {
+        original_url: String,
+        address: SocketAddr,
+        pending_requests: mpsc::Receiver<PendingRequest>,
+        received_requests: mpsc::Receiver<Request<Bytes>>,
+        server_tasks: Vec<AbortHandle>,
+        client_task: Option<JoinHandle<String>>,
+    }
+
+    impl TestProxy {
+        async fn start() -> Self {
+            let origin = TcpListener::bind("127.0.0.1:0").await.expect("bind origin");
+
+            let original_url = format!("http://{}/inspect?value=1", origin.local_addr().unwrap());
+
+            let (received_sender, received_requests) = mpsc::channel(1);
+
+            let origin_task = tokio::spawn(async move {
+                let (stream, _) = origin.accept().await.expect("accept origin connection");
+
+                let service = service_fn(move |request: Request<Incoming>| {
+                    let sender = received_sender.clone();
+                    async move {
+                        let (parts, body) = request.into_parts();
+                        let body = body.collect().await?.to_bytes();
+                        let _ = sender.send(Request::from_parts(parts, body)).await;
+                        Ok::<_, hyper::Error>(Response::new(Full::new(Bytes::from_static(b"ok"))))
+                    }
+                });
+
+                hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(stream), service)
+                    .await
+                    .expect("serve origin connection");
+            });
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+            let address = listener.local_addr().expect("proxy address");
+            let (pending_sender, pending_requests) = mpsc::channel(1);
+            let handler = Arc::new(InterceptHandler::new(pending_sender));
+            let proxy_task = tokio::spawn(HttpForwardProxyServer::new(listener, handler).run());
+
+            Self {
+                original_url,
+                address,
+                pending_requests,
+                received_requests,
+                server_tasks: vec![origin_task.abort_handle(), proxy_task.abort_handle()],
+                client_task: None,
+            }
+        }
+
+        async fn intercept(&mut self, wire_request: String) -> PendingRequest {
+            let address = self.address;
+            self.client_task = Some(tokio::spawn(async move {
+                timeout(TEST_TIMEOUT, async {
+                    let mut stream = TcpStream::connect(address).await.expect("connect to proxy");
+                    stream
+                        .write_all(wire_request.as_bytes())
+                        .await
+                        .expect("send request");
+                    let mut response = String::new();
+                    stream
+                        .read_to_string(&mut response)
+                        .await
+                        .expect("read response");
+                    response
+                })
+                .await
+                .expect("client request timed out")
+            }));
+
+            timeout(TEST_TIMEOUT, self.pending_requests.recv())
+                .await
+                .expect("request was not queued")
+                .expect("interceptor queue closed")
+        }
+
+        async fn forward(
+            &mut self,
+            reply: oneshot::Sender<InterceptReply>,
+            edited_request: Request<Bytes>,
+        ) -> Request<Bytes> {
+            reply
+                .send(InterceptReply::Forward(edited_request))
+                .unwrap_or_else(|_| panic!("handler stopped before Forward"));
+            timeout(TEST_TIMEOUT, self.received_requests.recv())
+                .await
+                .expect("request did not reach the original destination")
+                .expect("origin stopped before receiving the request")
+        }
+
+        async fn response(&mut self) -> String {
+            self.client_task
+                .take()
+                .expect("client request must be started")
+                .await
+                .expect("client task failed")
+        }
+    }
+
+    impl Drop for TestProxy {
+        fn drop(&mut self) {
+            for task in &self.server_tasks {
+                task.abort();
+            }
+            if let Some(task) = &self.client_task {
+                task.abort();
+            }
+        }
+    }
+
+    fn post_request(url: &str) -> String {
+        format!(
+            concat!(
+                "POST {} HTTP/1.1\r\n",
+                "Host: example.com\r\n",
+                "Connection: close\r\n",
+                "Content-Length: 4\r\n",
+                "\r\n",
+                "ping",
+            ),
+            url
+        )
+    }
+
     #[tokio::test]
-    async fn forward_returns_the_edited_request_with_updated_body_headers() {
-        let (queue_sender, mut queue_receiver) = mpsc::channel(1);
+    async fn queues_original_url_separately_from_origin_form_request() {
+        let mut proxy = TestProxy::start().await;
+        let pending = proxy.intercept(post_request(&proxy.original_url)).await;
 
-        let handler = InterceptHandler::new(queue_sender);
-
-        let original = buffered_request(Bytes::from_static(b"ping"));
-
-        let handler_task = tokio::spawn(async move { handler.handle(original).await });
-
-        let pending = timeout(TEST_TIMEOUT, queue_receiver.recv())
-            .await
-            .expect("handler must enqueue the request before the deadline")
-            .expect("request queue must remain open");
-
+        assert_eq!(
+            pending.original_uri,
+            proxy.original_url.parse::<Uri>().unwrap()
+        );
+        assert_eq!(pending.request.uri(), "/inspect?value=1");
+        assert_eq!(pending.request.method(), "POST");
+        assert_eq!(pending.request.headers()["host"], "example.com");
         assert_eq!(pending.request.body(), b"ping".as_slice());
 
-        // The editor may leave stale framing headers; the handler must rebuild them.
+        let received = proxy.forward(pending.reply, pending.request).await;
+        let response = proxy.response().await;
+
+        assert_eq!(received.uri(), "/inspect?value=1");
+        assert_eq!(received.body(), b"ping".as_slice());
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(response.ends_with("\r\n\r\nok"));
+    }
+
+    #[tokio::test]
+    async fn path_edits_are_sent_to_the_original_destination() {
+        let mut proxy = TestProxy::start().await;
+        let pending = proxy.intercept(post_request(&proxy.original_url)).await;
+        let mut edited_request = pending.request;
+        *edited_request.uri_mut() = "/edited?value=2".parse().unwrap();
+
+        let received = proxy.forward(pending.reply, edited_request).await;
+
+        assert_eq!(received.uri(), "/edited?value=2");
+        assert_eq!(received.headers()["host"], "example.com");
+        assert_eq!(received.body(), b"ping".as_slice());
+    }
+
+    #[tokio::test]
+    async fn host_edits_are_sent_to_the_original_destination() {
+        let mut proxy = TestProxy::start().await;
+        let pending = proxy.intercept(post_request(&proxy.original_url)).await;
+        let mut edited_request = pending.request;
+        edited_request
+            .headers_mut()
+            .insert("host", "elsewhere.example:1234".parse().unwrap());
+
+        let received = proxy.forward(pending.reply, edited_request).await;
+
+        assert_eq!(received.headers()["host"], "elsewhere.example:1234");
+        assert_eq!(received.uri(), "/inspect?value=1");
+    }
+
+    #[tokio::test]
+    async fn proxy_headers_are_hidden_from_the_editor() {
+        let mut proxy = TestProxy::start().await;
+        let wire_request = format!(
+            concat!(
+                "POST {} HTTP/1.1\r\n",
+                "Host: example.com\r\n",
+                "Connection: close\r\n",
+                "Connection: X-Proxy-Only\r\n",
+                "X-Proxy-Only: remove\r\n",
+                "Proxy-Connection: keep-alive\r\n",
+                "Proxy-Authorization: Basic test\r\n",
+                "X-Application: preserve\r\n",
+                "Content-Length: 4\r\n",
+                "\r\n",
+                "ping",
+            ),
+            proxy.original_url
+        );
+
+        let pending = proxy.intercept(wire_request).await;
+        let headers = pending.request.headers();
+
+        assert!(!headers.contains_key("connection"));
+        assert!(!headers.contains_key("proxy-connection"));
+        assert!(!headers.contains_key("proxy-authorization"));
+        assert!(!headers.contains_key("x-proxy-only"));
+        assert_eq!(headers["x-application"], "preserve");
+        assert_eq!(pending.request.body(), b"ping".as_slice());
+    }
+
+    #[tokio::test]
+    async fn proxy_headers_added_in_the_editor_are_removed_before_forwarding() {
+        let mut proxy = TestProxy::start().await;
+        let pending = proxy.intercept(post_request(&proxy.original_url)).await;
+        let edited_request = Request::builder()
+            .method("POST")
+            .uri("/inspect?value=1")
+            .header("host", "example.com")
+            .header("proxy-connection", "keep-alive")
+            .header("proxy-authorization", "Basic edited")
+            .header("connection", "x-edited-hop")
+            .header("x-edited-hop", "remove")
+            .header("x-application", "preserve")
+            .body(pending.request.into_body())
+            .unwrap();
+
+        let received = proxy.forward(pending.reply, edited_request).await;
+        let headers = received.headers();
+
+        assert!(!headers.contains_key("proxy-connection"));
+        assert!(!headers.contains_key("proxy-authorization"));
+        assert!(!headers.contains_key("x-edited-hop"));
+        assert_eq!(headers["x-application"], "preserve");
+        assert_eq!(received.body(), b"ping".as_slice());
+    }
+
+    #[tokio::test]
+    async fn chunked_body_is_decoded_before_editing() {
+        let mut proxy = TestProxy::start().await;
+        let wire_request = format!(
+            concat!(
+                "POST {} HTTP/1.1\r\n",
+                "Host: example.com\r\n",
+                "Connection: close\r\n",
+                "Transfer-Encoding: chunked\r\n",
+                "Trailer: x-checksum\r\n",
+                "\r\n",
+                "4\r\n",
+                "ping\r\n",
+                "0\r\n",
+                "x-checksum: test\r\n",
+                "\r\n",
+            ),
+            proxy.original_url
+        );
+
+        let pending = proxy.intercept(wire_request).await;
+
+        assert_eq!(pending.request.body(), b"ping".as_slice());
+        assert_eq!(pending.request.headers()["content-length"], "4");
+        assert!(!pending.request.headers().contains_key("transfer-encoding"));
+        assert!(!pending.request.headers().contains_key("trailer"));
+
+        let received = proxy.forward(pending.reply, pending.request).await;
+
+        assert_eq!(received.body(), b"ping".as_slice());
+        assert_eq!(received.headers()["content-length"], "4");
+    }
+
+    #[tokio::test]
+    async fn edited_binary_body_is_forwarded_with_its_updated_length() {
+        let mut proxy = TestProxy::start().await;
+        let pending = proxy.intercept(post_request(&proxy.original_url)).await;
+        let mut edited_request = pending.request;
+        *edited_request.body_mut() = Bytes::from_static(b"edited\x00\xff");
+
+        let received = proxy.forward(pending.reply, edited_request).await;
+
+        assert_eq!(received.body(), b"edited\x00\xff".as_slice());
+        assert_eq!(received.headers()["content-length"], "8");
+    }
+
+    async fn intercept_body(
+        body: Bytes,
+    ) -> (PendingRequest, JoinHandle<Option<Request<ProxyBody>>>) {
+        let (sender, mut requests) = mpsc::channel(1);
+        let handler = InterceptHandler::new(sender);
+        let request = buffered_request(body);
+        let task = tokio::spawn(async move { handler.handle(original_uri(), request).await });
+        let pending = timeout(TEST_TIMEOUT, requests.recv())
+            .await
+            .expect("handler did not queue the request")
+            .expect("handler queue closed");
+        (pending, task)
+    }
+
+    async fn handler_result(
+        task: JoinHandle<Option<Request<ProxyBody>>>,
+    ) -> Option<Request<Bytes>> {
+        let request = timeout(TEST_TIMEOUT, task)
+            .await
+            .expect("handler did not finish")
+            .expect("handler task failed")?;
+        let (parts, body) = request.into_parts();
+        let body = timeout(TEST_TIMEOUT, body.collect())
+            .await
+            .expect("forwarded body could not be read")
+            .expect("reading forwarded body failed")
+            .to_bytes();
+        Some(Request::from_parts(parts, body))
+    }
+
+    #[tokio::test]
+    async fn forward_returns_the_edited_request_with_updated_body_headers() {
+        let (pending, task) = intercept_body(Bytes::from_static(b"ping")).await;
         let edited_request = Request::builder()
             .method("PATCH")
-            .uri("http://elsewhere.example/edited")
+            .uri("/edited")
+            // These lengths describe the original body, not the edited body.
             .header("content-length", 4)
             .header("transfer-encoding", "chunked")
             .header("trailer", "x-checksum")
             .body(Bytes::from_static(b"edited\x00\xff"))
-            .expect("edited test request must be valid");
-
-        let reply_sent = pending.reply.send(InterceptReply::Forward(edited_request));
+            .unwrap();
 
         assert!(
-            reply_sent.is_ok(),
-            "handler must be waiting for the decision"
+            pending
+                .reply
+                .send(InterceptReply::Forward(edited_request))
+                .is_ok()
         );
-
-        let decision = timeout(TEST_TIMEOUT, handler_task)
-            .await
-            .expect("handler must finish after Forward")
-            .expect("handler task must not panic");
-        let forwarded = decision.expect("Forward must return a request");
+        let forwarded = handler_result(task).await.expect("request was dropped");
 
         assert_eq!(forwarded.method(), "PATCH");
-        assert_eq!(forwarded.uri(), "http://elsewhere.example/edited");
+        assert_eq!(forwarded.uri(), "/edited");
+        assert_eq!(forwarded.body(), b"edited\x00\xff".as_slice());
         assert_eq!(forwarded.headers()["content-length"], "8");
         assert!(!forwarded.headers().contains_key("transfer-encoding"));
         assert!(!forwarded.headers().contains_key("trailer"));
+    }
 
-        let forwarded_body = timeout(TEST_TIMEOUT, forwarded.into_body().collect())
-            .await
-            .expect("forwarded body must be readable before the deadline")
-            .expect("reading the forwarded body must succeed")
-            .to_bytes();
+    #[tokio::test]
+    async fn buffered_request_keeps_the_original_url_as_separate_metadata() {
+        let (pending, task) = intercept_body(Bytes::from_static(b"ping")).await;
 
-        assert_eq!(forwarded_body, b"edited\x00\xff".as_slice());
+        assert_eq!(pending.original_uri, original_uri());
+        assert_eq!(pending.request.uri(), "/original");
+        assert_eq!(pending.request.body(), b"ping".as_slice());
+
+        assert!(pending.reply.send(InterceptReply::Drop).is_ok());
+        assert!(handler_result(task).await.is_none());
     }
 
     #[tokio::test]
     async fn drop_decision_returns_no_request() {
-        let (queue_sender, mut queue_receiver) = mpsc::channel(1);
+        let (pending, task) = intercept_body(Bytes::from_static(b"ping")).await;
 
-        let handler = InterceptHandler::new(queue_sender);
+        assert!(pending.reply.send(InterceptReply::Drop).is_ok());
+        let result = handler_result(task).await;
 
-        let original = buffered_request(Bytes::from_static(b"ping"));
-
-        let handler_task = tokio::spawn(async move { handler.handle(original).await });
-
-        let pending = timeout(TEST_TIMEOUT, queue_receiver.recv())
-            .await
-            .expect("handler must enqueue the request before the deadline")
-            .expect("request queue must remain open");
-
-        let reply_sent = pending.reply.send(InterceptReply::Drop);
-
-        assert!(
-            reply_sent.is_ok(),
-            "handler must be waiting for the decision"
-        );
-
-        let decision = timeout(TEST_TIMEOUT, handler_task)
-            .await
-            .expect("handler must finish after Drop")
-            .expect("handler task must not panic");
-
-        assert!(decision.is_none(), "Drop must not return a request");
+        assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn canceled_reply_returns_no_request() {
-        let (queue_sender, mut queue_receiver) = mpsc::channel(1);
-
-        let handler = InterceptHandler::new(queue_sender);
-
-        let original = buffered_request(Bytes::from_static(b"ping"));
-
-        let handler_task = tokio::spawn(async move { handler.handle(original).await });
-
-        let pending = timeout(TEST_TIMEOUT, queue_receiver.recv())
-            .await
-            .expect("handler must enqueue the request before the deadline")
-            .expect("request queue must remain open");
+        let (pending, task) = intercept_body(Bytes::from_static(b"ping")).await;
 
         drop(pending.reply);
+        let result = handler_result(task).await;
 
-        let decision = timeout(TEST_TIMEOUT, handler_task)
-            .await
-            .expect("handler must finish when the reply sender is dropped")
-            .expect("handler task must not panic");
+        assert!(result.is_none());
+    }
 
-        assert!(decision.is_none(), "a canceled reply must drop the request");
+    fn pending_body() -> (Request<ProxyBody>, oneshot::Receiver<()>) {
+        let (notification, receiver) = oneshot::channel();
+        let body = PendingBody {
+            notify_when_polled: Some(notification),
+        }
+        .boxed();
+        (Request::new(body), receiver)
     }
 
     #[tokio::test]
@@ -238,15 +528,9 @@ mod tests {
         let _occupied_slot = queue_sender
             .try_reserve()
             .expect("test setup must occupy the only queue slot");
-        let (notify_when_polled, mut body_polled) = oneshot::channel();
-        let original = Request::new(
-            PendingBody {
-                notify_when_polled: Some(notify_when_polled),
-            }
-            .boxed(),
-        );
+        let (original, mut body_polled) = pending_body();
 
-        let decision = timeout(TEST_TIMEOUT, handler.handle(original))
+        let decision = timeout(TEST_TIMEOUT, handler.handle(original_uri(), original))
             .await
             .expect("a full queue must reject the request without waiting for its body");
 
@@ -266,18 +550,11 @@ mod tests {
 
         let handler = InterceptHandler::new(queue_sender);
 
-        let (notify_when_polled, mut body_polled) = oneshot::channel();
-
-        let original = Request::new(
-            PendingBody {
-                notify_when_polled: Some(notify_when_polled),
-            }
-            .boxed(),
-        );
+        let (original, mut body_polled) = pending_body();
 
         drop(queue_receiver);
 
-        let decision = timeout(TEST_TIMEOUT, handler.handle(original))
+        let decision = timeout(TEST_TIMEOUT, handler.handle(original_uri(), original))
             .await
             .expect("a closed queue must reject the request without waiting for its body");
 
@@ -297,7 +574,7 @@ mod tests {
         let handler = InterceptHandler::new(queue_sender);
         let original = buffered_request(Bytes::from(vec![b'x'; MAX_BODY_SIZE + 1]));
 
-        let decision = timeout(TEST_TIMEOUT, handler.handle(original))
+        let decision = timeout(TEST_TIMEOUT, handler.handle(original_uri(), original))
             .await
             .expect("handler must reject an oversized body before the deadline");
 
@@ -320,16 +597,10 @@ mod tests {
 
         let handler = InterceptHandler::new(queue_sender);
 
-        let (notify_when_polled, body_polled) = oneshot::channel();
+        let (original, body_polled) = pending_body();
 
-        let original = Request::new(
-            PendingBody {
-                notify_when_polled: Some(notify_when_polled),
-            }
-            .boxed(),
-        );
-
-        let handler_task = tokio::spawn(async move { handler.handle(original).await });
+        let handler_task =
+            tokio::spawn(async move { handler.handle(original_uri(), original).await });
 
         timeout(TEST_TIMEOUT, body_polled)
             .await
@@ -338,10 +609,7 @@ mod tests {
 
         drop(queue_receiver);
 
-        let decision = timeout(TEST_TIMEOUT, handler_task)
-            .await
-            .expect("closing the UI must interrupt the pending body read")
-            .expect("handler task must not panic");
+        let decision = handler_result(handler_task).await;
 
         assert!(decision.is_none(), "closing the UI must drop the request");
     }

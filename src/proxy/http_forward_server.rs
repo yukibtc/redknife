@@ -30,12 +30,20 @@ enum InnerError {
     MissingHost,
     #[error("request dropped")]
     RequestDropped,
+    #[error("expected an origin-form request target")]
+    ExpectedOriginForm,
 }
 
 #[async_trait::async_trait]
 pub trait HttpForwardProxyServerRequestHandler: Send + Sync {
+    /// Receive an origin-form request without hop-by-hop headers.
+    /// The original URI is separate metadata; its upstream destination stays fixed.
     /// Return the request to forward, or `None` to drop it.
-    async fn handle(&self, req: Request<ProxyBody>) -> Option<Request<ProxyBody>>;
+    async fn handle(
+        &self,
+        original_uri: Uri,
+        req: Request<ProxyBody>,
+    ) -> Option<Request<ProxyBody>>;
 }
 
 pub struct HttpForwardProxyServer {
@@ -95,29 +103,26 @@ async fn forward(
         ));
     }
 
-    let req: Request<ProxyBody> = req.map(|body| body.boxed());
-
-    let mut req = handler
-        .handle(req)
-        .await
-        .ok_or(InnerError::RequestDropped)?;
-
-    // Keep the upstream address before replacing the absolute URI with origin-form.
-    let host: String = req
-        .uri()
+    let original_uri: Uri = req.uri().clone();
+    let host: String = original_uri
         .host()
         .map(str::to_string)
         .ok_or(InnerError::MissingHost)?;
-    let port: u16 = req.uri().port_u16().unwrap_or(80);
+    let port: u16 = original_uri.port_u16().unwrap_or(80);
 
-    // Forward proxy receives absolute-form; origin expects origin-form.
-    let origin: Uri = req
-        .uri()
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or("/")
-        .parse()?;
-    *req.uri_mut() = origin;
+    let mut req: Request<ProxyBody> = req.map(|body| body.boxed());
+
+    prepare_origin_request(&mut req)?;
+
+    let mut req = handler
+        .handle(original_uri, req)
+        .await
+        .ok_or(InnerError::RequestDropped)?;
+
+    if req.uri().scheme().is_some() || req.uri().authority().is_some() {
+        return Err(InnerError::ExpectedOriginForm);
+    }
+
     remove_hop_by_hop(req.headers_mut());
 
     let stream: TcpStream = TcpStream::connect((host.as_str(), port)).await?;
@@ -138,6 +143,20 @@ async fn forward(
     remove_hop_by_hop(resp.headers_mut());
 
     Ok(resp.map(|b| b.boxed()))
+}
+
+fn prepare_origin_request<B>(req: &mut Request<B>) -> Result<(), InvalidUri> {
+    if req.uri().scheme().is_some() {
+        *req.uri_mut() = req
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or("/")
+            .parse()?;
+    }
+
+    remove_hop_by_hop(req.headers_mut());
+    Ok(())
 }
 
 fn remove_hop_by_hop(headers: &mut HeaderMap) {
@@ -202,17 +221,36 @@ mod tests {
 
     #[async_trait::async_trait]
     impl HttpForwardProxyServerRequestHandler for FixedAction {
-        async fn handle(&self, req: Request<ProxyBody>) -> Option<Request<ProxyBody>> {
+        async fn handle(
+            &self,
+            _original_uri: Uri,
+            req: Request<ProxyBody>,
+        ) -> Option<Request<ProxyBody>> {
             if self.drop { None } else { Some(req) }
         }
     }
 
-    async fn send_request(proxy_addr: SocketAddr, url: String) -> String {
-        let mut stream = TcpStream::connect(proxy_addr).await.unwrap();
+    struct EditTarget {
+        target: Uri,
+    }
 
+    #[async_trait::async_trait]
+    impl HttpForwardProxyServerRequestHandler for EditTarget {
+        async fn handle(
+            &self,
+            _original_uri: Uri,
+            mut req: Request<ProxyBody>,
+        ) -> Option<Request<ProxyBody>> {
+            *req.uri_mut() = self.target.clone();
+            Some(req)
+        }
+    }
+
+    async fn send_request(proxy_addr: SocketAddr, url: String) -> String {
         let req = format!(
-            "POST {url} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 4\r\n\r\nping"
+            "POST {url} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nConnection: X-Proxy-Only\r\nX-Proxy-Only: remove\r\nProxy-Connection: keep-alive\r\nProxy-Authorization: Basic test\r\nX-Application: preserve\r\nContent-Length: 4\r\n\r\nping"
         );
+        let mut stream = TcpStream::connect(proxy_addr).await.unwrap();
         stream.write_all(req.as_bytes()).await.unwrap();
 
         let mut response = String::new();
@@ -236,6 +274,10 @@ mod tests {
                 assert_eq!(req.method(), Method::POST);
                 assert_eq!(req.uri(), "/inspect?value=1");
                 assert_eq!(req.headers()["host"], "localhost");
+                assert_eq!(req.headers()["x-application"], "preserve");
+                assert!(!req.headers().contains_key("proxy-connection"));
+                assert!(!req.headers().contains_key("proxy-authorization"));
+                assert!(!req.headers().contains_key("x-proxy-only"));
 
                 let body = req.into_body().collect().await.unwrap().to_bytes();
                 assert_eq!(body, Bytes::from_static(b"ping"));
@@ -290,5 +332,40 @@ mod tests {
             upstream.accept().unwrap_err().kind(),
             io::ErrorKind::WouldBlock
         );
+    }
+
+    #[tokio::test]
+    async fn absolute_and_authority_edits_never_contact_an_upstream() {
+        let original = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let original_addr = original.local_addr().unwrap();
+        let alternate = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let alternate_addr = alternate.local_addr().unwrap();
+
+        for target in [
+            format!("http://{original_addr}/edited"),
+            format!("http://{alternate_addr}/edited"),
+            alternate_addr.to_string(),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxy_addr = listener.local_addr().unwrap();
+            let server = HttpForwardProxyServer::new(
+                listener,
+                Arc::new(EditTarget {
+                    target: target.parse().unwrap(),
+                }),
+            );
+            let proxy_task = task::spawn(server.run());
+            let response =
+                send_request(proxy_addr, format!("http://{original_addr}/original")).await;
+            proxy_task.abort();
+            assert!(response.is_empty(), "{response:?}");
+        }
+
+        for upstream in [original, alternate] {
+            assert_eq!(
+                upstream.into_std().unwrap().accept().unwrap_err().kind(),
+                io::ErrorKind::WouldBlock
+            );
+        }
     }
 }

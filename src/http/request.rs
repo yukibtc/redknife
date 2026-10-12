@@ -15,6 +15,8 @@ pub enum HttpWireRequestError {
     IncompleteHeaders,
     #[error("Only HTTP/1.0 and HTTP/1.1 are supported")]
     UnsupportedVersion,
+    #[error("Expected a path such as /login?q=1; interceptor destination is fixed")]
+    ExpectedOriginForm,
 }
 
 /// Serialize the complete request, keeping arbitrary header and body bytes intact.

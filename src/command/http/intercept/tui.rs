@@ -253,9 +253,10 @@ mod tests {
         app.push(PendingRequest {
             id: 1,
             timestamp: Local::now(),
+            original_uri: "http://example.com/".parse().unwrap(),
             request: Request::builder()
                 .method("POST")
-                .uri("http://example.com/")
+                .uri("/")
                 .header("content-length", body.len())
                 .body(Bytes::from_static(body))
                 .expect("test request must be valid"),
@@ -272,7 +273,7 @@ mod tests {
 
         let selected = app.current_mut().expect("queued request must be selected");
         selected.editor = TextArea::from([
-            "PUT http://example.com/changed HTTP/1.1",
+            "PUT /changed HTTP/1.1",
             "content-length: 7",
             "",
             "edited",
@@ -296,7 +297,7 @@ mod tests {
             panic!("F5 must forward the request, but sent Drop");
         };
         assert_eq!(request.method(), "PUT");
-        assert_eq!(request.uri(), "http://example.com/changed");
+        assert_eq!(request.uri(), "/changed");
         assert_eq!(request.headers()["content-length"], "7");
         assert_eq!(request.body(), b"edited\n".as_slice());
     }
@@ -308,7 +309,7 @@ mod tests {
 
         let selected = app.current_mut().expect("queued request must be selected");
         selected.editor = TextArea::from([
-            "PUT http://example.com/changed HTTP/1.1",
+            "PUT /changed HTTP/1.1",
             "content-length: 7",
             "",
             "edited",
@@ -332,7 +333,7 @@ mod tests {
             panic!("F5 must forward the request, but sent Drop");
         };
         assert_eq!(request.method(), "PUT");
-        assert_eq!(request.uri(), "http://example.com/changed");
+        assert_eq!(request.uri(), "/changed");
         assert_eq!(request.headers()["content-length"], "7");
         assert_eq!(request.body(), b"edited\n".as_slice());
     }
@@ -351,7 +352,7 @@ mod tests {
         let saved = fs::read(&path).expect("saved request must be readable");
         assert_eq!(
             saved,
-            b"POST http://example.com/ HTTP/1.1\r\ncontent-length: 4\r\n\r\n\x00\xff\x1b\n"
+            b"POST / HTTP/1.1\r\ncontent-length: 4\r\n\r\n\x00\xff\x1b\n"
         );
     }
 
