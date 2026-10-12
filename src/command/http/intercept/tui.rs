@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -217,7 +218,8 @@ fn save_selected(app: &mut App, out_dir: Option<&PathBuf>) {
     let hash: Output<Sha1> = hasher.finalize();
 
     // Use the deterministic content hash as the filename
-    let filename: String = format!("req-{}.txt", hex::encode(hash.as_slice()));
+    let filename: String = make_filename(hash);
+
     let path: PathBuf = match out_dir {
         Some(out_dir) => out_dir.join(&filename),
         None => PathBuf::from(&filename),
@@ -231,6 +233,18 @@ fn save_selected(app: &mut App, out_dir: Option<&PathBuf>) {
     };
 }
 
+fn make_filename(hash: Output<Sha1>) -> String {
+    let mut filename: String = String::from("req-");
+
+    for byte in hash.as_slice() {
+        write!(&mut filename, "{byte:02x}").unwrap();
+    }
+
+    filename.push_str(".txt");
+
+    filename
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -242,7 +256,7 @@ mod tests {
     use tokio::sync::oneshot;
     use tui_textarea::TextArea;
 
-    use super::{App, Focus, PendingRequest, handle_key};
+    use super::*;
     use crate::command::http::intercept::messages::InterceptReply;
 
     fn app_with_queued_request(body: &'static [u8]) -> (App, oneshot::Receiver<InterceptReply>) {
@@ -264,6 +278,16 @@ mod tests {
         });
 
         (app, receiver)
+    }
+
+    #[test]
+    fn test_make_filename() {
+        let hash = Sha1::digest(b"hello world");
+
+        assert_eq!(
+            make_filename(hash),
+            "req-2aae6c35c94fcfb415dbe95f408b9ce91ee846ed.txt"
+        );
     }
 
     #[test]
