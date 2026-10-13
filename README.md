@@ -63,6 +63,10 @@ rk --help
 
 All notable changes are documented in the [CHANGELOG.md](CHANGELOG.md).
 
+## State
+
+redknife is still in early development! Features and APIs will change, and bugs are expected.
+
 ## Disclaimer
 
 redknife is intended for educational purposes and authorized security testing only. Use it only on systems you own or have explicit permission to test.
