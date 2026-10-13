@@ -253,8 +253,8 @@ mod tests {
     use chrono::Local;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use http::Request;
+    use ratatui_textarea::TextArea;
     use tokio::sync::oneshot;
-    use tui_textarea::TextArea;
 
     use super::*;
     use crate::command::http::intercept::messages::InterceptReply;

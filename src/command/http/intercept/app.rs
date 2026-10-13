@@ -6,7 +6,7 @@ use bytes::Bytes;
 use crossterm::event::{KeyCode, KeyEvent};
 use http::Request;
 use ratatui::widgets::ListState;
-use tui_textarea::{CursorMove, Scrolling, TextArea};
+use ratatui_textarea::{CursorMove, Scrolling, TextArea};
 
 use super::messages::{InterceptReply, PendingRequest};
 use crate::http::request::{HttpWireRequestError, format_request, parse_request};
@@ -371,8 +371,8 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use http::Request;
     use http::header::CONTENT_LENGTH;
+    use ratatui_textarea::TextArea;
     use tokio::sync::oneshot;
-    use tui_textarea::TextArea;
 
     use super::{App, QueuedRequest, RequestAction, Status};
     use crate::command::http::intercept::messages::{InterceptReply, PendingRequest};

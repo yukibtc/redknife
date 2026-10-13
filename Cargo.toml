@@ -20,19 +20,19 @@ path = "src/main.rs"
 bytes = "1.12.1"
 chrono = "0.4.45"
 clap = { version =  "4.6.7", features = ["derive"] }
-crossterm = "0.28"
+crossterm = "0.29.0"
 http = "1.5.0"
 http-body-util = "0.1.5"
 httparse = "1.10.1"
 hyper = { version = "1.12.0", default-features = false, features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
-ratatui = "0.29"
+ratatui = "0.30.2"
+ratatui-textarea = "0.9.3"
 rustls-native-certs = "0.8"
 sha1 = "0.11.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", default-features = false, features = ["fs", "io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-tui-textarea = "0.7"
 
 [dev-dependencies]
 tempfile = "3.27.0"
