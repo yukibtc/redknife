@@ -8,7 +8,7 @@ homepage = "https://github.com/yukibtc/redknife"
 repository = "https://github.com/yukibtc/redknife.git"
 license = "MIT"
 readme = "README.md"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 keywords = ["security", "pentesting", "red-team", "cli", "tui"]
 categories = ["command-line-utilities", "network-programming"]
 

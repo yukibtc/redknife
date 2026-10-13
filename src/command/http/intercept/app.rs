@@ -292,7 +292,9 @@ impl App {
         action: RequestAction,
     ) -> Result<u64, HttpWireRequestError> {
         let reply: InterceptReply = match action {
-            RequestAction::Forward => InterceptReply::Forward(self.queue[index].forward_request()?),
+            RequestAction::Forward => {
+                InterceptReply::Forward(Box::new(self.queue[index].forward_request()?))
+            }
             RequestAction::Drop => InterceptReply::Drop,
         };
 

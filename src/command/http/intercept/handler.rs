@@ -223,7 +223,7 @@ mod tests {
             edited_request: Request<Bytes>,
         ) -> Request<Bytes> {
             reply
-                .send(InterceptReply::Forward(edited_request))
+                .send(InterceptReply::Forward(Box::new(edited_request)))
                 .unwrap_or_else(|_| panic!("handler stopped before Forward"));
             timeout(TEST_TIMEOUT, self.received_requests.recv())
                 .await
@@ -466,7 +466,7 @@ mod tests {
         assert!(
             pending
                 .reply
-                .send(InterceptReply::Forward(edited_request))
+                .send(InterceptReply::Forward(Box::new(edited_request)))
                 .is_ok()
         );
         let forwarded = handler_result(task).await.expect("request was dropped");

@@ -4,7 +4,7 @@ use http::{Request, Uri};
 use tokio::sync::oneshot;
 
 pub enum InterceptReply {
-    Forward(Request<Bytes>),
+    Forward(Box<Request<Bytes>>),
     Drop,
 }
 
