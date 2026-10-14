@@ -5,9 +5,10 @@ use clap::Parser;
 mod cli;
 mod command;
 mod http;
+mod ldap;
 mod proxy;
 
-use self::cli::{Cli, Command, HttpCommand};
+use self::cli::{Cli, Command, HttpCommand, LdapCommand};
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Cli = Cli::parse();
@@ -23,6 +24,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 file,
                 output,
             } => command::http::repeat::run(target, file, output).await?,
+        },
+        Command::Ldap { command } => match command {
+            LdapCommand::Serve { ip, port, raw } => {
+                command::ldap::serve::run(ip, port, raw).await?
+            }
         },
     }
 

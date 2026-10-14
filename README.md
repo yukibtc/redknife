@@ -8,9 +8,13 @@
 
 ## Features
 
-- **HTTP Callback Server**: Receive and log incoming HTTP requests.
-- **HTTP Interceptor**: Intercept, inspect, modify, and forward HTTP requests.
-- **HTTP Repeater**: Replay request over HTTP or HTTPS.
+- **HTTP**
+  - **HTTP Callback Server**: Receive and log incoming HTTP requests.
+  - **HTTP Interceptor**: Intercept, inspect, modify, and forward HTTP requests.
+  - **HTTP Repeater**: Replay HTTP and HTTPS requests.
+
+- **LDAP**
+  - **LDAP Server**: A minimal LDAP server (i.e., for capturing credentials via LDAP pass-back attacks).
 
 ## Install
 

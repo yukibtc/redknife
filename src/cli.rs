@@ -14,11 +14,17 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// HTTP utilities for receiving and inspecting requests
+    /// HTTP utilities
     #[command(arg_required_else_help = true)]
     Http {
         #[command(subcommand)]
         command: HttpCommand,
+    },
+    /// LDAP utilities
+    #[command(arg_required_else_help = true)]
+    Ldap {
+        #[command(subcommand)]
+        command: LdapCommand,
     },
 }
 
@@ -62,5 +68,21 @@ pub enum HttpCommand {
         /// Save response headers and decoded body to this path instead of stdout
         #[arg(short, long)]
         output: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LdapCommand {
+    /// Starts a minimal LDAP server.
+    Serve {
+        /// Local IP address to listen on
+        #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))]
+        ip: IpAddr,
+        /// Local TCP port to listen on
+        #[arg(long, default_value_t = 389)]
+        port: u16,
+        /// Show complete incoming BER messages in addition to decoded fields
+        #[arg(long)]
+        raw: bool,
     },
 }
