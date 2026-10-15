@@ -7,12 +7,10 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 mod app;
-mod handler;
-mod messages;
 mod tui;
 mod ui;
 
-use self::handler::InterceptHandler;
+use crate::http::intercept::HttpInterceptHandler;
 use crate::proxy::http_forward_server::HttpForwardProxyServer;
 
 pub async fn run(ip: IpAddr, port: u16, out_dir: Option<PathBuf>) -> io::Result<()> {
@@ -23,7 +21,7 @@ pub async fn run(ip: IpAddr, port: u16, out_dir: Option<PathBuf>) -> io::Result<
 
     let (sender, receiver) = mpsc::channel(4096);
 
-    let handler = Arc::new(InterceptHandler::new(sender));
+    let handler = Arc::new(HttpInterceptHandler::new(sender));
     let proxy = HttpForwardProxyServer::new(listener, handler);
 
     tokio::select! {

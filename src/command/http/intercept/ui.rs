@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph};
 
 use super::app::{App, Focus};
-use super::messages::PendingRequest;
+use crate::http::intercept::HttpInterceptPendingRequest;
 
 const ACTIVE_BORDER: Color = Color::LightRed;
 const INACTIVE_BORDER: Color = Color::Gray;
@@ -109,7 +109,7 @@ fn render_queue(frame: &mut Frame, area: Rect, app: &mut App) {
         .queue
         .iter()
         .map(|item| {
-            let req: &PendingRequest = &item.pending;
+            let req: &HttpInterceptPendingRequest = &item.pending;
             ListItem::new(vec![
                 Line::from(format!(
                     "#{} {} {}",

@@ -8,7 +8,7 @@ use http::Request;
 use ratatui::widgets::ListState;
 use ratatui_textarea::{CursorMove, Scrolling, TextArea};
 
-use super::messages::{InterceptReply, PendingRequest};
+use crate::http::intercept::{HttpInterceptPendingRequest, HttpInterceptReply};
 use crate::http::request::{HttpWireRequestError, format_request, parse_request};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +37,7 @@ impl Focus {
 }
 
 pub struct QueuedRequest {
-    pub pending: PendingRequest,
+    pub pending: HttpInterceptPendingRequest,
     pub editor: TextArea<'static>,
     pub editable: bool,
     original_bytes: Vec<u8>,
@@ -45,7 +45,7 @@ pub struct QueuedRequest {
 }
 
 impl QueuedRequest {
-    fn new(pending: PendingRequest) -> Result<Self, HttpWireRequestError> {
+    fn new(pending: HttpInterceptPendingRequest) -> Result<Self, HttpWireRequestError> {
         let raw: Vec<u8> = format_request(&pending.request)?;
 
         let text: Option<(Vec<String>, &'static str)> = editable_text(&raw);
@@ -235,7 +235,7 @@ impl App {
         }
     }
 
-    pub fn push(&mut self, pending: PendingRequest) {
+    pub fn push(&mut self, pending: HttpInterceptPendingRequest) {
         let id: u64 = pending.id;
 
         match QueuedRequest::new(pending) {
@@ -291,11 +291,11 @@ impl App {
         index: usize,
         action: RequestAction,
     ) -> Result<u64, HttpWireRequestError> {
-        let reply: InterceptReply = match action {
+        let reply: HttpInterceptReply = match action {
             RequestAction::Forward => {
-                InterceptReply::Forward(Box::new(self.queue[index].forward_request()?))
+                HttpInterceptReply::Forward(Box::new(self.queue[index].forward_request()?))
             }
-            RequestAction::Drop => InterceptReply::Drop,
+            RequestAction::Drop => HttpInterceptReply::Drop,
         };
 
         let request: QueuedRequest = self.queue.remove(index).expect("existing queue index");
@@ -374,14 +374,16 @@ mod tests {
     use ratatui_textarea::TextArea;
     use tokio::sync::oneshot;
 
-    use super::{App, QueuedRequest, RequestAction, Status};
-    use crate::command::http::intercept::messages::{InterceptReply, PendingRequest};
+    use super::*;
     use crate::http::request::HttpWireRequestError;
 
     fn pending_request(
         id: u64,
         body: &'static [u8],
-    ) -> (PendingRequest, oneshot::Receiver<InterceptReply>) {
+    ) -> (
+        HttpInterceptPendingRequest,
+        oneshot::Receiver<HttpInterceptReply>,
+    ) {
         let (reply, receiver) = oneshot::channel();
         let request = Request::builder()
             .method("POST")
@@ -390,7 +392,7 @@ mod tests {
             .body(Bytes::from_static(body))
             .expect("test request must be valid");
         (
-            PendingRequest {
+            HttpInterceptPendingRequest {
                 id,
                 timestamp: Local::now(),
                 original_uri: format!("http://example.com/{id}").parse().unwrap(),
@@ -619,7 +621,7 @@ mod tests {
                 .starts_with("Request #2:")
         );
 
-        let InterceptReply::Forward(edited_request) = edited_replies
+        let HttpInterceptReply::Forward(edited_request) = edited_replies
             .try_recv()
             .expect("edited request must receive a decision")
         else {
@@ -639,7 +641,7 @@ mod tests {
             "invalid request must keep waiting for a decision"
         );
 
-        let InterceptReply::Forward(unchanged_request) = unchanged_replies
+        let HttpInterceptReply::Forward(unchanged_request) = unchanged_replies
             .try_recv()
             .expect("unchanged request must receive a decision")
         else {
@@ -669,13 +671,13 @@ mod tests {
             valid_replies
                 .try_recv()
                 .expect("quitting must resolve the valid request"),
-            InterceptReply::Drop
+            HttpInterceptReply::Drop
         ));
         assert!(matches!(
             invalid_replies
                 .try_recv()
                 .expect("quitting must also resolve the invalid draft"),
-            InterceptReply::Drop
+            HttpInterceptReply::Drop
         ));
     }
 
@@ -706,7 +708,7 @@ mod tests {
         );
     }
 
-    fn app_with_draft(request_line: &str) -> (App, oneshot::Receiver<InterceptReply>) {
+    fn app_with_draft(request_line: &str) -> (App, oneshot::Receiver<HttpInterceptReply>) {
         let (pending, replies) = pending_request(1, b"");
         let mut app = App::new();
         app.push(pending);
@@ -821,7 +823,10 @@ mod tests {
 
         assert_eq!(resolved, Some(1));
         assert!(app.queue.is_empty());
-        assert!(matches!(replies.try_recv().unwrap(), InterceptReply::Drop));
+        assert!(matches!(
+            replies.try_recv().unwrap(),
+            HttpInterceptReply::Drop
+        ));
     }
 
     #[test]
@@ -831,7 +836,7 @@ mod tests {
         let resolved = app.resolve_selected(RequestAction::Forward);
 
         assert_eq!(resolved, Some(1));
-        let InterceptReply::Forward(request) = replies.try_recv().unwrap() else {
+        let HttpInterceptReply::Forward(request) = replies.try_recv().unwrap() else {
             panic!("OPTIONS * should be forwarded");
         };
         assert_eq!(request.method(), "OPTIONS");
@@ -866,7 +871,7 @@ mod tests {
         assert_eq!(app.selection.selected(), None);
         assert!(matches!(
             replies.try_recv().expect("Drop must send a decision"),
-            InterceptReply::Drop
+            HttpInterceptReply::Drop
         ));
     }
 }

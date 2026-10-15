@@ -8,19 +8,19 @@ use http_body_util::{BodyExt, Full, Limited};
 use tokio::sync::mpsc::Permit;
 use tokio::sync::{mpsc, oneshot};
 
-use super::messages::{InterceptReply, PendingRequest};
+use super::{HttpInterceptPendingRequest, HttpInterceptReply};
 use crate::http::request::normalize_body_headers;
 use crate::proxy::http_forward_server::{HttpForwardProxyServerRequestHandler, ProxyBody};
 
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
-pub struct InterceptHandler {
-    sender: mpsc::Sender<PendingRequest>,
+pub struct HttpInterceptHandler {
+    sender: mpsc::Sender<HttpInterceptPendingRequest>,
     ids: AtomicU64,
 }
 
-impl InterceptHandler {
-    pub fn new(sender: mpsc::Sender<PendingRequest>) -> Self {
+impl HttpInterceptHandler {
+    pub fn new(sender: mpsc::Sender<HttpInterceptPendingRequest>) -> Self {
         Self {
             sender,
             ids: AtomicU64::new(1),
@@ -28,7 +28,7 @@ impl InterceptHandler {
     }
 }
 
-impl HttpForwardProxyServerRequestHandler for InterceptHandler {
+impl HttpForwardProxyServerRequestHandler for HttpInterceptHandler {
     fn handle<'a>(
         &'a self,
         original_uri: Uri,
@@ -36,7 +36,7 @@ impl HttpForwardProxyServerRequestHandler for InterceptHandler {
     ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>> {
         Box::pin(async move {
             // Reserve capacity before reading a potentially large or slow body.
-            let permit: Permit<PendingRequest> = self.sender.try_reserve().ok()?;
+            let permit: Permit<HttpInterceptPendingRequest> = self.sender.try_reserve().ok()?;
 
             let timestamp: DateTime<Local> = Local::now();
 
@@ -55,7 +55,7 @@ impl HttpForwardProxyServerRequestHandler for InterceptHandler {
 
             let id: u64 = self.ids.fetch_add(1, Ordering::Relaxed);
 
-            let pending = PendingRequest {
+            let pending = HttpInterceptPendingRequest {
                 id,
                 timestamp,
                 original_uri,
@@ -67,11 +67,11 @@ impl HttpForwardProxyServerRequestHandler for InterceptHandler {
 
             // If the UI is closed or the oneshot is canceled, fail closed.
             match receiver.await.ok()? {
-                InterceptReply::Forward(mut edited) => {
+                HttpInterceptReply::Forward(mut edited) => {
                     normalize_body_headers(&mut edited);
                     Some(edited.map(|body| Full::new(body).map_err(|never| match never {}).boxed()))
                 }
-                InterceptReply::Drop => None,
+                HttpInterceptReply::Drop => None,
             }
         })
     }
@@ -97,8 +97,7 @@ mod tests {
     use tokio::task::{AbortHandle, JoinHandle};
     use tokio::time::timeout;
 
-    use super::{InterceptHandler, MAX_BODY_SIZE};
-    use crate::command::http::intercept::messages::{InterceptReply, PendingRequest};
+    use super::*;
     use crate::proxy::http_forward_server::{
         HttpForwardProxyServer, HttpForwardProxyServerRequestHandler, ProxyBody,
     };
@@ -142,7 +141,7 @@ mod tests {
     struct TestProxy {
         original_url: String,
         address: SocketAddr,
-        pending_requests: mpsc::Receiver<PendingRequest>,
+        pending_requests: mpsc::Receiver<HttpInterceptPendingRequest>,
         received_requests: mpsc::Receiver<Request<Bytes>>,
         server_tasks: Vec<AbortHandle>,
         client_task: Option<JoinHandle<String>>,
@@ -178,7 +177,7 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
             let address = listener.local_addr().expect("proxy address");
             let (pending_sender, pending_requests) = mpsc::channel(1);
-            let handler = Arc::new(InterceptHandler::new(pending_sender));
+            let handler = Arc::new(HttpInterceptHandler::new(pending_sender));
             let proxy_task = tokio::spawn(HttpForwardProxyServer::new(listener, handler).run());
 
             Self {
@@ -191,7 +190,7 @@ mod tests {
             }
         }
 
-        async fn intercept(&mut self, wire_request: String) -> PendingRequest {
+        async fn intercept(&mut self, wire_request: String) -> HttpInterceptPendingRequest {
             let address = self.address;
             self.client_task = Some(tokio::spawn(async move {
                 timeout(TEST_TIMEOUT, async {
@@ -219,11 +218,11 @@ mod tests {
 
         async fn forward(
             &mut self,
-            reply: oneshot::Sender<InterceptReply>,
+            reply: oneshot::Sender<HttpInterceptReply>,
             edited_request: Request<Bytes>,
         ) -> Request<Bytes> {
             reply
-                .send(InterceptReply::Forward(Box::new(edited_request)))
+                .send(HttpInterceptReply::Forward(Box::new(edited_request)))
                 .unwrap_or_else(|_| panic!("handler stopped before Forward"));
             timeout(TEST_TIMEOUT, self.received_requests.recv())
                 .await
@@ -422,9 +421,12 @@ mod tests {
 
     async fn intercept_body(
         body: Bytes,
-    ) -> (PendingRequest, JoinHandle<Option<Request<ProxyBody>>>) {
+    ) -> (
+        HttpInterceptPendingRequest,
+        JoinHandle<Option<Request<ProxyBody>>>,
+    ) {
         let (sender, mut requests) = mpsc::channel(1);
-        let handler = InterceptHandler::new(sender);
+        let handler = HttpInterceptHandler::new(sender);
         let request = buffered_request(body);
         let task = tokio::spawn(async move { handler.handle(original_uri(), request).await });
         let pending = timeout(TEST_TIMEOUT, requests.recv())
@@ -466,7 +468,7 @@ mod tests {
         assert!(
             pending
                 .reply
-                .send(InterceptReply::Forward(Box::new(edited_request)))
+                .send(HttpInterceptReply::Forward(Box::new(edited_request)))
                 .is_ok()
         );
         let forwarded = handler_result(task).await.expect("request was dropped");
@@ -487,7 +489,7 @@ mod tests {
         assert_eq!(pending.request.uri(), "/original");
         assert_eq!(pending.request.body(), b"ping".as_slice());
 
-        assert!(pending.reply.send(InterceptReply::Drop).is_ok());
+        assert!(pending.reply.send(HttpInterceptReply::Drop).is_ok());
         assert!(handler_result(task).await.is_none());
     }
 
@@ -495,7 +497,7 @@ mod tests {
     async fn drop_decision_returns_no_request() {
         let (pending, task) = intercept_body(Bytes::from_static(b"ping")).await;
 
-        assert!(pending.reply.send(InterceptReply::Drop).is_ok());
+        assert!(pending.reply.send(HttpInterceptReply::Drop).is_ok());
         let result = handler_result(task).await;
 
         assert!(result.is_none());
@@ -524,7 +526,7 @@ mod tests {
     async fn full_queue_drops_the_request_without_reading_its_body() {
         let (queue_sender, _queue_receiver) = mpsc::channel(1);
 
-        let handler = InterceptHandler::new(queue_sender.clone());
+        let handler = HttpInterceptHandler::new(queue_sender.clone());
 
         // Holding the only slot makes this queue full before the handler starts.
         let _occupied_slot = queue_sender
@@ -550,7 +552,7 @@ mod tests {
     async fn closed_queue_drops_the_request_without_reading_its_body() {
         let (queue_sender, queue_receiver) = mpsc::channel(1);
 
-        let handler = InterceptHandler::new(queue_sender);
+        let handler = HttpInterceptHandler::new(queue_sender);
 
         let (original, mut body_polled) = pending_body();
 
@@ -573,7 +575,7 @@ mod tests {
     #[tokio::test]
     async fn oversized_body_is_never_queued() {
         let (queue_sender, mut queue_receiver) = mpsc::channel(1);
-        let handler = InterceptHandler::new(queue_sender);
+        let handler = HttpInterceptHandler::new(queue_sender);
         let original = buffered_request(Bytes::from(vec![b'x'; MAX_BODY_SIZE + 1]));
 
         let decision = timeout(TEST_TIMEOUT, handler.handle(original_uri(), original))
@@ -597,7 +599,7 @@ mod tests {
     async fn closing_ui_interrupts_a_body_read() {
         let (queue_sender, queue_receiver) = mpsc::channel(1);
 
-        let handler = InterceptHandler::new(queue_sender);
+        let handler = HttpInterceptHandler::new(queue_sender);
 
         let (original, body_polled) = pending_body();
 

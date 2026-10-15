@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use super::app::{App, Focus, RequestAction};
 use super::ui;
 use crate::command::http::intercept::app::Status;
-use crate::command::http::intercept::messages::PendingRequest;
+use crate::http::intercept::HttpInterceptPendingRequest;
 
 enum InputEvent {
     Key(KeyEvent),
@@ -60,7 +60,7 @@ impl StopKeyboard {
 
 /// Run one persistent UI while proxy tasks enqueue pending requests.
 pub async fn run(
-    mut receiver: mpsc::Receiver<PendingRequest>,
+    mut receiver: mpsc::Receiver<HttpInterceptPendingRequest>,
     addr: SocketAddr,
     out_dir: Option<PathBuf>,
 ) -> io::Result<()> {
@@ -71,7 +71,7 @@ pub async fn run(
 
 async fn event_loop(
     terminal: &mut DefaultTerminal,
-    receiver: &mut mpsc::Receiver<PendingRequest>,
+    receiver: &mut mpsc::Receiver<HttpInterceptPendingRequest>,
     address: SocketAddr,
     out_dir: Option<PathBuf>,
 ) -> io::Result<()> {
@@ -257,14 +257,16 @@ mod tests {
     use tokio::sync::oneshot;
 
     use super::*;
-    use crate::command::http::intercept::messages::InterceptReply;
+    use crate::http::intercept::HttpInterceptReply;
 
-    fn app_with_queued_request(body: &'static [u8]) -> (App, oneshot::Receiver<InterceptReply>) {
+    fn app_with_queued_request(
+        body: &'static [u8],
+    ) -> (App, oneshot::Receiver<HttpInterceptReply>) {
         let (reply, receiver) = oneshot::channel();
 
         let mut app = App::new();
 
-        app.push(PendingRequest {
+        app.push(HttpInterceptPendingRequest {
             id: 1,
             timestamp: Local::now(),
             original_uri: "http://example.com/".parse().unwrap(),
@@ -314,7 +316,7 @@ mod tests {
             app.queue.is_empty(),
             "forwarded request must leave the queue"
         );
-        let InterceptReply::Forward(request) = replies
+        let HttpInterceptReply::Forward(request) = replies
             .try_recv()
             .expect("F5 must send a decision to the handler")
         else {
@@ -350,7 +352,7 @@ mod tests {
             app.queue.is_empty(),
             "forwarded request must leave the queue"
         );
-        let InterceptReply::Forward(request) = replies
+        let HttpInterceptReply::Forward(request) = replies
             .try_recv()
             .expect("F5 must send a decision to the handler")
         else {
