@@ -26,6 +26,7 @@ http-body-util = "0.1.5"
 httparse = "1.10.1"
 hyper = { version = "1.12.0", default-features = false, features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
+indexmap = "2.14.2"
 ratatui = "0.30.2"
 ratatui-textarea = "0.9.3"
 rustls-native-certs = "0.8"

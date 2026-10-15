@@ -7,7 +7,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 pub async fn write_response<W>(
     mut response: Response<Incoming>,
     output: &mut W,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     W: AsyncWrite + Unpin,
 {

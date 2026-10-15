@@ -4,8 +4,10 @@ use http::{Request, Uri};
 use tokio::sync::oneshot;
 
 mod handler;
+mod queue;
 
 pub(crate) use self::handler::HttpInterceptHandler;
+pub(crate) use self::queue::{QueuedRequest, RequestQueue};
 
 pub(crate) enum HttpInterceptReply {
     Forward(Box<Request<Bytes>>),

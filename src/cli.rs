@@ -57,16 +57,18 @@ pub enum HttpCommand {
         #[arg(long)]
         out_dir: Option<PathBuf>,
     },
-    /// Repeat a saved HTTP request
+    /// Repeat a request, opening the HTTP editor when no file is given
     #[command(arg_required_else_help = true)]
     Repeat {
         /// Target URL
         target: HttpTarget,
-        // TODO: make this optional when we'll have a TUI for the repeater; None will mean open the TUI editor
         /// Path to a saved HTTP request to repeat
-        file: PathBuf,
-        /// Save response headers and decoded body to this path instead of stdout
+        file: Option<PathBuf>,
+        /// Open the request file in the interactive HTTP editor
         #[arg(short, long)]
+        interactive: bool,
+        /// Save response headers and decoded body to this path instead of stdout
+        #[arg(short, long, requires = "file", conflicts_with = "interactive")]
         output: Option<PathBuf>,
     },
 }

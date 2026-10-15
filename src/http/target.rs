@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::FromStr;
 
 use http::Uri;
@@ -10,8 +11,6 @@ pub enum HttpTargetError {
     Uri(#[from] InvalidUri),
     #[error("expected HTTP or HTTPS")]
     UnexpectedScheme,
-    #[error("must contain only an origin")]
-    MustContainOnlyAnOrigin,
     #[error("missing authority")]
     MissingAuthority,
 }
@@ -26,7 +25,10 @@ pub struct HttpTarget {
 impl HttpTarget {
     fn parse(url: &str) -> Result<Self, HttpTargetError> {
         let uri: Uri = url.parse()?;
+        Self::from_uri(&uri)
+    }
 
+    pub(super) fn from_uri(uri: &Uri) -> Result<Self, HttpTargetError> {
         let tls: bool = match uri.scheme_str() {
             Some("http") => false,
             Some("https") => true,
@@ -34,10 +36,6 @@ impl HttpTarget {
                 return Err(HttpTargetError::UnexpectedScheme);
             }
         };
-
-        if uri.path_and_query().is_some_and(|pq| pq.as_str() != "/") {
-            return Err(HttpTargetError::MustContainOnlyAnOrigin);
-        }
 
         let authority: &Authority = uri.authority().ok_or(HttpTargetError::MissingAuthority)?;
 
@@ -63,6 +61,15 @@ impl HttpTarget {
     }
 
     #[inline]
+    pub(crate) fn host_and_port(&self) -> String {
+        if self.host.contains(":") {
+            format!("[{}]:{}", self.host, self.port)
+        } else {
+            format!("{}:{}", self.host, self.port)
+        }
+    }
+
+    #[inline]
     pub(super) fn is_tls(&self) -> bool {
         self.tls
     }
@@ -73,6 +80,13 @@ impl FromStr for HttpTarget {
 
     fn from_str(url: &str) -> Result<Self, Self::Err> {
         Self::parse(url)
+    }
+}
+
+impl fmt::Display for HttpTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let scheme: &str = if self.tls { "https" } else { "http" };
+        write!(f, "{scheme}://{}", self.host_and_port())
     }
 }
 

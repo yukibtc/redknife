@@ -21,7 +21,7 @@ use super::request::normalize_body_headers;
 use super::response::write_response;
 use super::target::HttpTarget;
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub async fn send_http<W>(
     mut request: Request<Bytes>,
@@ -46,10 +46,9 @@ where
 
     // If miss the host, push it
     if !request.headers().contains_key(HOST) {
-        request.headers_mut().insert(
-            HOST,
-            format!("{}:{}", target.host(), target.port()).parse()?,
-        );
+        request
+            .headers_mut()
+            .insert(HOST, target.host_and_port().parse()?);
     }
 
     time::timeout(timeout, async {
@@ -97,11 +96,11 @@ async fn connect_tls(stream: TcpStream, host: &str) -> Result<TlsStream<TcpStrea
         .await?)
 }
 
-async fn exchange<S: AsyncRead + AsyncWrite + Unpin, W: AsyncWrite + Unpin>(
-    stream: S,
-    request: Request<Bytes>,
-    output: &mut W,
-) -> Result<()> {
+async fn exchange<S, W>(stream: S, request: Request<Bytes>, output: &mut W) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin,
+{
     let (mut sender, connection) =
         hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;
 

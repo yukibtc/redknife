@@ -32,6 +32,8 @@
 ### Added
 
 - Add LDAP Server
+- TUI for HTTP Repeater
+- HTTP Intercept to Repeater functionally
 
 ## 0.2.0 - 2026/10/12
 
