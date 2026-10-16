@@ -3,15 +3,3 @@ opt-level = 3       # Optimize for performance
 lto = true          # Enable Link Time Optimization
 codegen-units = 1   # Reduce the number of codegen units to increase optimizations
 strip = true        # Full strip the binary.
-
-[env]
-# Use Clang for C/Assembly code built via cc for these MUSL targets.
-# Rust code is compiled by rustc; final linking uses rust-lld as configured below.
-CC_x86_64_unknown_linux_musl = "clang"
-CC_aarch64_unknown_linux_musl = "clang"
-
-[target.x86_64-unknown-linux-musl]
-linker = "rust-lld"
-
-[target.aarch64-unknown-linux-musl]
-linker = "rust-lld"

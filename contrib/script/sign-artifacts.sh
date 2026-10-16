@@ -4,11 +4,11 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/release-common.sh"
 
-cd "${SCRIPT_DIR}/../.."
+cd "$PROJECT_ROOT"
 
-version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+version=$(read_package_version)
 
 cd "dist/$version"
 
