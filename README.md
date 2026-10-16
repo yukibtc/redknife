@@ -10,7 +10,7 @@
 
 - **HTTP**
   - **HTTP Callback Server**: Receive and log incoming HTTP requests.
-  - **HTTP Interceptor**: Intercept, inspect, modify, and forward HTTP requests.
+  - **HTTP Proxy**: Inspect, intercept, modify, and forward/drop HTTP requests.
   - **HTTP Repeater**: Replay HTTP and HTTPS requests.
 
 - **LDAP**

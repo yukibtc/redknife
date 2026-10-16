@@ -156,7 +156,7 @@ pub(super) fn render(frame: &mut Frame, model: &mut Model) {
 
     let help: String = match model.mode() {
         Mode::Edit => {
-            "F5 Apply · Esc Cancel · F2 Raw/Hex · Ctrl+S Save request\nChanges return to Interceptor; no request is sent.".into()
+            "F5 Apply · Esc Cancel · F2 Raw/Hex · Ctrl+S Save request\nChanges return to Proxy; no request is sent.".into()
         }
         Mode::Repeat => {
             format!("F5 Send · Tab / Shift-Tab Focus · F2 Raw/Hex · Ctrl+S Save request\nCtrl+C Cancel send · Ctrl+Q / Esc {} · Response arrows scroll", model.exit_label.as_str())

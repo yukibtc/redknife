@@ -89,7 +89,7 @@ pub(super) fn render(frame: &mut Frame, model: &mut Model) {
         .areas(frame.area());
 
     let heading: String = format!(
-        "{APP_NAME} / HTTP / INTERCEPT · {} · {} pending",
+        "{APP_NAME} / HTTP / PROXY · {} · {} pending",
         model.address,
         model.queue.len()
     );

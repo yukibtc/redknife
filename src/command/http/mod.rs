@@ -1,3 +1,3 @@
 pub mod callback;
-pub mod intercept;
+pub mod proxy;
 pub mod repeat;

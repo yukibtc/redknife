@@ -39,15 +39,15 @@ pub enum HttpCommand {
         #[arg(long, default_value_t = 8000)]
         port: u16,
     },
-    /// Intercept, inspect, and modify HTTP traffic.
+    /// Inspect, intercept, modify, and forward/drop HTTP traffic.
     ///
-    /// Starts a local HTTP interception proxy that allows requests
+    /// Starts a local HTTP proxy that allows requests
     /// to be inspected, modified, forwarded, or dropped.
     ///
     /// Configure your browser or HTTP client to use the proxy.
     ///
-    /// HTTPS is not supported.
-    Intercept {
+    /// HTTPS is not supported yet.
+    Proxy {
         /// Local IP address to bind the proxy to
         #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))]
         ip: IpAddr,

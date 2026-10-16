@@ -16,8 +16,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         Command::Http { command } => match command {
             HttpCommand::Callback { ip, port } => command::http::callback::run(ip, port).await?,
-            HttpCommand::Intercept { ip, port, out_dir } => {
-                command::http::intercept::run(ip, port, out_dir).await?
+            HttpCommand::Proxy { ip, port, out_dir } => {
+                command::http::proxy::run(ip, port, out_dir).await?
             }
             HttpCommand::Repeat {
                 target,

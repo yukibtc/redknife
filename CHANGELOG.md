@@ -29,6 +29,11 @@
 
 ## Unreleased
 
+### Breaking change
+
+- Rename `rk http intercept` to `rk http proxy`
+- Open HTTP Proxy with interception disabled by default
+
 ### Added
 
 - Add LDAP Server

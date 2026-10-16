@@ -29,12 +29,12 @@ pub(crate) enum Action {
     Quit,
 }
 
-pub(crate) struct HttpInterceptTuiSession {
+pub(crate) struct HttpProxyTuiSession {
     model: Model,
     receiver: mpsc::Receiver<HttpInterceptPendingRequest>,
 }
 
-impl HttpInterceptTuiSession {
+impl HttpProxyTuiSession {
     /// Start an empty screen for a proxy already sending requests to this receiver.
     pub(crate) fn new(
         receiver: mpsc::Receiver<HttpInterceptPendingRequest>,

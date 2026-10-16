@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use crate::http::intercept::HttpInterceptHandler;
 use crate::http::proxy::HttpProxyServer;
 use crate::tui::http::editor::{self, ExitLabel};
-use crate::tui::http::intercept::{Action, HttpInterceptTuiSession};
+use crate::tui::http::proxy::{Action, HttpProxyTuiSession};
 use crate::tui::terminal::TerminalSession;
 
 pub async fn run(ip: IpAddr, port: u16, out_dir: Option<PathBuf>) -> io::Result<()> {
@@ -27,12 +27,12 @@ pub async fn run(ip: IpAddr, port: u16, out_dir: Option<PathBuf>) -> io::Result<
 
     // Keep one terminal session while switching between the interceptor and editor.
     let mut terminal: TerminalSession = TerminalSession::new()?;
-    let mut interceptor: HttpInterceptTuiSession =
-        HttpInterceptTuiSession::new(receiver, listen_addr);
+    let mut proxy_tui_session: HttpProxyTuiSession =
+        HttpProxyTuiSession::new(receiver, listen_addr);
 
     tokio::select! {
         result = proxy.run() => result?,
-        result = run_tui(&mut interceptor, terminal.terminal(), out_dir.as_deref()) => result?,
+        result = run_tui(&mut proxy_tui_session, terminal.terminal(), out_dir.as_deref()) => result?,
         result = signal::ctrl_c() => result?,
     }
 
@@ -40,15 +40,15 @@ pub async fn run(ip: IpAddr, port: u16, out_dir: Option<PathBuf>) -> io::Result<
 }
 
 async fn run_tui(
-    interceptor: &mut HttpInterceptTuiSession,
+    proxy_tui_session: &mut HttpProxyTuiSession,
     terminal: &mut DefaultTerminal,
     directory: Option<&Path>,
 ) -> io::Result<()> {
     loop {
-        match interceptor.run(terminal, directory).await? {
+        match proxy_tui_session.run(terminal, directory).await? {
             Action::Edit { id, raw, target } => {
                 if let Some(edited) = editor::edit(terminal, raw, &target, directory).await? {
-                    interceptor.apply_edit(id, edited);
+                    proxy_tui_session.apply_edit(id, edited);
                 }
             }
             Action::Repeat { raw, target } => {
