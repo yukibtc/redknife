@@ -61,13 +61,13 @@ pub async fn run(
             let mut file: File = File::create(path).await?;
             let result = send_http(request, &target, TIMEOUT, &mut file).await;
             file.flush().await?;
-            result.map_err(|error| error as Box<dyn Error>)?;
+            result?;
         }
         None => {
             let mut stdout: Stdout = io::stdout();
             let result = send_http(request, &target, TIMEOUT, &mut stdout).await;
             stdout.flush().await?;
-            result.map_err(|error| error as Box<dyn Error>)?;
+            result?;
         }
     }
 

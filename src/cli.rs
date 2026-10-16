@@ -45,6 +45,7 @@ pub enum HttpCommand {
     /// to be inspected, modified, forwarded, or dropped.
     ///
     /// Configure your browser or HTTP client to use the proxy.
+    ///
     /// HTTPS is not supported.
     Intercept {
         /// Local IP address to bind the proxy to
@@ -67,7 +68,7 @@ pub enum HttpCommand {
         /// Open the request file in the interactive HTTP editor
         #[arg(short, long)]
         interactive: bool,
-        /// Save response headers and decoded body to this path instead of stdout
+        /// Save normalized response headers and unpacked body to this path instead of stdout
         #[arg(short, long, requires = "file", conflicts_with = "interactive")]
         output: Option<PathBuf>,
     },

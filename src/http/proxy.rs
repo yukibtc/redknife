@@ -6,7 +6,6 @@ use bytes::Bytes;
 use http::header::CONNECTION;
 use http::uri::InvalidUri;
 use http::{HeaderMap, HeaderName, Method, Request, Response, StatusCode, Uri};
-use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
@@ -15,18 +14,34 @@ use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task;
 
+use super::body::{HttpBody, HttpBodyError};
+use super::compression::{UnpackError, unpack_response};
+
 type ClientBuilder = hyper::client::conn::http1::Builder;
 type ServerBuilder = hyper::server::conn::http1::Builder;
-pub type ProxyBody = BoxBody<Bytes, hyper::Error>;
+
+pub type HttpProxyHandlerResult = Result<Option<Request<HttpBody>>, HttpProxyHandlerError>;
 
 #[derive(Debug, Error)]
-enum InnerError {
-    #[error(transparent)]
+pub enum HttpProxyHandlerError {
+    #[error("Cannot read intercepted request body: {0}")]
+    Body(#[from] HttpBodyError),
+    #[error("Cannot unpack intercepted request: {0}")]
+    Unpack(#[from] UnpackError),
+    #[error("Other error: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+}
+
+#[derive(Debug, Error)]
+enum HttpProxyError {
+    #[error("HTTP proxy I/O error: {0}")]
     IO(#[from] io::Error),
-    #[error(transparent)]
+    #[error("Invalid proxy request URI: {0}")]
     Uri(#[from] InvalidUri),
-    #[error(transparent)]
+    #[error("HTTP proxy protocol error: {0}")]
     Hyper(#[from] hyper::Error),
+    #[error("HTTP proxy handler: {0}")]
+    ProxyHandler(#[from] HttpProxyHandlerError),
     #[error("missing host")]
     MissingHost,
     #[error("request dropped")]
@@ -38,12 +53,12 @@ enum InnerError {
 pub trait HttpProxyServerRequestHandler: Send + Sync {
     /// Receive an origin-form request without hop-by-hop headers.
     /// The original URI is separate metadata; its upstream destination stays fixed.
-    /// Return the request to forward, or `None` to drop it.
-    fn handle<'a>(
-        &'a self,
+    /// Return the request to forward, `None` to drop it, or an error.
+    fn handle(
+        &self,
         original_uri: Uri,
-        req: Request<ProxyBody>,
-    ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>>;
+        req: Request<HttpBody>,
+    ) -> Pin<Box<dyn Future<Output = HttpProxyHandlerResult> + Send + '_>>;
 }
 
 pub struct HttpProxyServer {
@@ -66,7 +81,7 @@ impl HttpProxyServer {
             task::spawn(async move {
                 let service = service_fn(move |req| {
                     let handler: Arc<dyn HttpProxyServerRequestHandler> = Arc::clone(&handler);
-                    async move { forward(req, handler.clone()).await }
+                    async move { forward(req, handler).await }
                 });
 
                 let _ = ServerBuilder::new()
@@ -84,7 +99,7 @@ impl HttpProxyServer {
 async fn forward(
     req: Request<Incoming>,
     handler: Arc<dyn HttpProxyServerRequestHandler>,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, InnerError> {
+) -> Result<Response<HttpBody>, HttpProxyError> {
     if req.method() == Method::CONNECT {
         return Ok(text_response(
             StatusCode::NOT_IMPLEMENTED,
@@ -103,20 +118,20 @@ async fn forward(
     let host: String = original_uri
         .host()
         .map(str::to_string)
-        .ok_or(InnerError::MissingHost)?;
+        .ok_or(HttpProxyError::MissingHost)?;
     let port: u16 = original_uri.port_u16().unwrap_or(80);
 
-    let mut req: Request<ProxyBody> = req.map(|body| body.boxed());
+    let mut req: Request<HttpBody> = req.map(|body| body.map_err(Into::into).boxed());
 
     prepare_origin_request(&mut req)?;
 
-    let mut req = handler
+    let mut req: Request<HttpBody> = handler
         .handle(original_uri, req)
-        .await
-        .ok_or(InnerError::RequestDropped)?;
+        .await?
+        .ok_or(HttpProxyError::RequestDropped)?;
 
     if req.uri().scheme().is_some() || req.uri().authority().is_some() {
-        return Err(InnerError::ExpectedOriginForm);
+        return Err(HttpProxyError::ExpectedOriginForm);
     }
 
     remove_hop_by_hop(req.headers_mut());
@@ -134,11 +149,13 @@ async fn forward(
         let _ = conn.await;
     });
 
+    let is_head: bool = req.method() == Method::HEAD;
+
     let mut resp: Response<Incoming> = sender.send_request(req).await?;
 
     remove_hop_by_hop(resp.headers_mut());
 
-    Ok(resp.map(|b| b.boxed()))
+    Ok(unpack_response(resp, is_head))
 }
 
 fn prepare_origin_request<B>(req: &mut Request<B>) -> Result<(), InvalidUri> {
@@ -182,17 +199,17 @@ fn remove_hop_by_hop(headers: &mut HeaderMap) {
     }
 }
 
-fn empty() -> ProxyBody {
+fn empty() -> HttpBody {
     Empty::new().map_err(|never| match never {}).boxed()
 }
 
-fn full(text: &'static str) -> ProxyBody {
+fn full(text: &'static str) -> HttpBody {
     Full::new(Bytes::from_static(text.as_bytes()))
         .map_err(|never| match never {})
         .boxed()
 }
 
-fn text_response(status: StatusCode, text: &'static str) -> Response<ProxyBody> {
+fn text_response(status: StatusCode, text: &'static str) -> Response<HttpBody> {
     Response::builder()
         .status(status)
         .header("content-type", "text/plain; charset=utf-8")
@@ -216,12 +233,12 @@ mod tests {
     }
 
     impl HttpProxyServerRequestHandler for FixedAction {
-        fn handle<'a>(
-            &'a self,
+        fn handle(
+            &self,
             _original_uri: Uri,
-            req: Request<ProxyBody>,
-        ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>> {
-            Box::pin(async move { if self.drop { None } else { Some(req) } })
+            req: Request<HttpBody>,
+        ) -> Pin<Box<dyn Future<Output = HttpProxyHandlerResult> + Send + '_>> {
+            Box::pin(async move { Ok(if self.drop { None } else { Some(req) }) })
         }
     }
 
@@ -230,14 +247,14 @@ mod tests {
     }
 
     impl HttpProxyServerRequestHandler for EditTarget {
-        fn handle<'a>(
-            &'a self,
+        fn handle(
+            &self,
             _original_uri: Uri,
-            mut req: Request<ProxyBody>,
-        ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>> {
+            mut req: Request<HttpBody>,
+        ) -> Pin<Box<dyn Future<Output = HttpProxyHandlerResult> + Send + '_>> {
             Box::pin(async move {
                 *req.uri_mut() = self.target.clone();
-                Some(req)
+                Ok(Some(req))
             })
         }
     }

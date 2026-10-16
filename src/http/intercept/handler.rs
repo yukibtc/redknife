@@ -5,14 +5,14 @@ use bytes::Bytes;
 use chrono::{DateTime, Local};
 use http::{Request, Uri};
 use http_body_util::{BodyExt, Full, Limited};
-use tokio::sync::mpsc::Permit;
 use tokio::sync::{mpsc, oneshot};
 
+use super::super::constant::MAX_BODY_SIZE;
 use super::{HttpInterceptPendingRequest, HttpInterceptReply};
-use crate::http::proxy::{HttpProxyServerRequestHandler, ProxyBody};
+use crate::http::body::HttpBody;
+use crate::http::compression::unpack_request;
+use crate::http::proxy::{HttpProxyHandlerResult, HttpProxyServerRequestHandler};
 use crate::http::request::normalize_body_headers;
-
-const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
 pub struct HttpInterceptHandler {
     sender: mpsc::Sender<HttpInterceptPendingRequest>,
@@ -29,25 +29,32 @@ impl HttpInterceptHandler {
 }
 
 impl HttpProxyServerRequestHandler for HttpInterceptHandler {
-    fn handle<'a>(
-        &'a self,
+    fn handle(
+        &self,
         original_uri: Uri,
-        req: Request<ProxyBody>,
-    ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>> {
+        req: Request<HttpBody>,
+    ) -> Pin<Box<dyn Future<Output = HttpProxyHandlerResult> + Send + '_>> {
         Box::pin(async move {
             // Reserve capacity before reading a potentially large or slow body.
-            let permit: Permit<HttpInterceptPendingRequest> = self.sender.try_reserve().ok()?;
+            let Ok(permit) = self.sender.try_reserve() else {
+                return Ok(None);
+            };
 
             let timestamp: DateTime<Local> = Local::now();
 
             let (parts, body) = req.into_parts();
 
             let collected: Bytes = tokio::select! {
-                result = Limited::new(body, MAX_BODY_SIZE).collect() => result.ok()?.to_bytes(),
-                _ = self.sender.closed() => return None,
+                result = Limited::new(body, MAX_BODY_SIZE).collect() => result?.to_bytes(),
+                _ = self.sender.closed() => return Ok(None),
             };
 
             let mut buffered: Request<Bytes> = Request::from_parts(parts, collected);
+
+            tokio::select! {
+                result = unpack_request(&mut buffered) => { result?; },
+                _ = self.sender.closed() => return Ok(None),
+            }
 
             normalize_body_headers(&mut buffered);
 
@@ -66,12 +73,17 @@ impl HttpProxyServerRequestHandler for HttpInterceptHandler {
             permit.send(pending);
 
             // If the UI is closed or the oneshot is canceled, fail closed.
-            match receiver.await.ok()? {
-                HttpInterceptReply::Forward(mut edited) => {
+            match receiver.await {
+                Ok(HttpInterceptReply::Forward(mut edited)) => {
+                    unpack_request(&mut edited).await?;
+
                     normalize_body_headers(&mut edited);
-                    Some(edited.map(|body| Full::new(body).map_err(|never| match never {}).boxed()))
+
+                    Ok(Some(edited.map(|body| {
+                        Full::new(body).map_err(|never| match never {}).boxed()
+                    })))
                 }
-                HttpInterceptReply::Drop => None,
+                Ok(HttpInterceptReply::Drop) | Err(_) => Ok(None),
             }
         })
     }
@@ -79,6 +91,7 @@ impl HttpProxyServerRequestHandler for HttpInterceptHandler {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::sync::Arc;
@@ -86,23 +99,26 @@ mod tests {
     use std::time::Duration;
 
     use bytes::Bytes;
+    use futures_util::stream;
     use http::{Request, Response, Uri};
-    use http_body_util::{BodyExt, Full};
+    use http_body_util::{BodyExt, Full, StreamBody};
     use hyper::body::{Body, Frame, Incoming};
     use hyper::service::service_fn;
     use hyper_util::rt::TokioIo;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::mpsc::error::TryRecvError as QueueRecvError;
     use tokio::sync::{mpsc, oneshot};
     use tokio::task::{AbortHandle, JoinHandle};
     use tokio::time::timeout;
 
     use super::*;
-    use crate::http::proxy::{HttpProxyServer, HttpProxyServerRequestHandler, ProxyBody};
+    use crate::http::body::HttpBodyError;
+    use crate::http::proxy::{HttpProxyServer, HttpProxyServerRequestHandler};
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
-    fn buffered_request(body: Bytes) -> Request<ProxyBody> {
+    fn buffered_request(body: Bytes) -> Request<HttpBody> {
         Request::builder()
             .method("POST")
             .uri("/original")
@@ -421,7 +437,7 @@ mod tests {
         body: Bytes,
     ) -> (
         HttpInterceptPendingRequest,
-        JoinHandle<Option<Request<ProxyBody>>>,
+        JoinHandle<HttpProxyHandlerResult>,
     ) {
         let (sender, mut requests) = mpsc::channel(1);
         let handler = HttpInterceptHandler::new(sender);
@@ -434,13 +450,12 @@ mod tests {
         (pending, task)
     }
 
-    async fn handler_result(
-        task: JoinHandle<Option<Request<ProxyBody>>>,
-    ) -> Option<Request<Bytes>> {
+    async fn handler_result(task: JoinHandle<HttpProxyHandlerResult>) -> Option<Request<Bytes>> {
         let request = timeout(TEST_TIMEOUT, task)
             .await
             .expect("handler did not finish")
-            .expect("handler task failed")?;
+            .expect("handler task failed")
+            .expect("invalid request body")?;
         let (parts, body) = request.into_parts();
         let body = timeout(TEST_TIMEOUT, body.collect())
             .await
@@ -511,11 +526,12 @@ mod tests {
         assert!(result.is_none());
     }
 
-    fn pending_body() -> (Request<ProxyBody>, oneshot::Receiver<()>) {
+    fn pending_body() -> (Request<HttpBody>, oneshot::Receiver<()>) {
         let (notification, receiver) = oneshot::channel();
         let body = PendingBody {
             notify_when_polled: Some(notification),
         }
+        .map_err(HttpBodyError::from)
         .boxed();
         (Request::new(body), receiver)
     }
@@ -536,7 +552,10 @@ mod tests {
             .await
             .expect("a full queue must reject the request without waiting for its body");
 
-        assert!(decision.is_none(), "a full queue must drop the request");
+        assert!(
+            decision.unwrap().is_none(),
+            "a full queue must drop the request"
+        );
         assert!(
             matches!(
                 body_polled.try_recv(),
@@ -560,7 +579,10 @@ mod tests {
             .await
             .expect("a closed queue must reject the request without waiting for its body");
 
-        assert!(decision.is_none(), "a closed queue must drop the request");
+        assert!(
+            decision.unwrap().is_none(),
+            "a closed queue must drop the request"
+        );
         assert!(
             matches!(
                 body_polled.try_recv(),
@@ -581,8 +603,8 @@ mod tests {
             .expect("handler must reject an oversized body before the deadline");
 
         assert!(
-            decision.is_none(),
-            "an oversized body must drop the request"
+            decision.is_err(),
+            "an oversized body must return a size error"
         );
         assert!(
             matches!(
@@ -591,6 +613,31 @@ mod tests {
             ),
             "an oversized request must not reach the UI queue"
         );
+    }
+
+    #[tokio::test]
+    async fn test_body_at_the_limit_is_queued() {
+        let body: Bytes = Bytes::from(vec![b'x'; MAX_BODY_SIZE]);
+        let (pending, task) = intercept_body(body).await;
+
+        assert_eq!(pending.request.body().len(), MAX_BODY_SIZE);
+        assert!(pending.reply.send(HttpInterceptReply::Drop).is_ok());
+        assert!(handler_result(task).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_body_error_is_not_queued() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let handler: HttpInterceptHandler = HttpInterceptHandler::new(sender);
+        let frames: [Result<Frame<Bytes>, HttpBodyError>; 1] =
+            [Err(io::Error::other("body read failed").into())];
+        let body: HttpBody = StreamBody::new(stream::iter(frames)).boxed();
+        let request: Request<HttpBody> = Request::new(body);
+
+        let result: HttpProxyHandlerResult = handler.handle(original_uri(), request).await;
+
+        assert!(result.is_err());
+        assert!(matches!(receiver.try_recv(), Err(QueueRecvError::Empty)));
     }
 
     #[tokio::test]
