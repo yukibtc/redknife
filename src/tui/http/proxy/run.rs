@@ -10,21 +10,23 @@ use super::model::Model;
 use super::update::{self, Effect};
 use super::{Action, view};
 use crate::http::export::save_request;
-use crate::http::intercept::{HttpInterceptPendingRequest, RequestQueue};
+use crate::http::proxy::{PendingRequest, RequestQueue};
 use crate::tui::terminal::read_event;
 
 /// Drain available arrivals up to the local queue limit, preserving selection by ID.
-/// Returns whether arrivals were consumed, including requests that could not be queued.
-fn receive_pending(
-    model: &mut Model,
-    receiver: &mut mpsc::Receiver<HttpInterceptPendingRequest>,
-) -> bool {
-    let selected_id: Option<u64> = model.current().map(|request| request.id());
+/// Returns whether arrivals were consumed.
+fn receive_pending(model: &mut Model, receiver: &mut mpsc::Receiver<PendingRequest>) -> bool {
+    let selected_id: Option<u64> = model
+        .queue_state
+        .selected()
+        .and_then(|index| model.queue.get(index))
+        .map(|request| request.record().id);
+
     let was_empty: bool = model.queue.is_empty();
 
     let mut changed: bool = false;
 
-    // Backpressure also bounds the queue while the interceptor screen is active.
+    // Backpressure also bounds the queue while the proxy screen is active.
     while model.queue.len() < receiver.max_capacity() {
         let Ok(pending) = receiver.try_recv() else {
             break;
@@ -32,12 +34,7 @@ fn receive_pending(
 
         changed = true;
 
-        if let Err(error) = model.queue.push(pending) {
-            update::update(
-                model,
-                Message::SetStatus(format!("Cannot inspect request: {error}")),
-            );
-        }
+        model.queue.push(pending);
     }
 
     if changed {
@@ -61,7 +58,7 @@ fn receive_pending(
 
 fn resolve_all(
     queue: &mut RequestQueue,
-    receiver: &mut mpsc::Receiver<HttpInterceptPendingRequest>,
+    receiver: &mut mpsc::Receiver<PendingRequest>,
     forward: bool,
 ) -> (usize, usize) {
     // Resolve a snapshot, leaving subsequently arriving requests for inspection.
@@ -79,10 +76,7 @@ fn resolve_all(
             break;
         };
 
-        if queue.push(pending).is_err() {
-            failed += 1;
-            continue;
-        }
+        queue.push(pending);
 
         let index: usize = queue.len() - 1;
 
@@ -97,7 +91,11 @@ fn resolve_all(
 
 fn resolve_selected(model: &mut Model, forward: bool) -> Message {
     let selected_index: Option<usize> = model.queue_state.selected();
-    let selected_id: Option<u64> = model.current().map(|request| request.id());
+    let selected_id: Option<u64> = model
+        .queue_state
+        .selected()
+        .and_then(|index| model.queue.get(index))
+        .map(|request| request.record().id);
 
     let status: String = match (selected_index, selected_id) {
         (Some(index), Some(id)) => match model.queue.resolve(index, forward) {
@@ -118,10 +116,14 @@ fn resolve_selected(model: &mut Model, forward: bool) -> Message {
 
 fn resolve_waiting(
     model: &mut Model,
-    receiver: &mut mpsc::Receiver<HttpInterceptPendingRequest>,
+    receiver: &mut mpsc::Receiver<PendingRequest>,
     forward: bool,
 ) -> Message {
-    let selected_id: Option<u64> = model.current().map(|request| request.id());
+    let selected_id: Option<u64> = model
+        .queue_state
+        .selected()
+        .and_then(|index| model.queue.get(index))
+        .map(|request| request.record().id);
 
     let (resolved, failed) = resolve_all(&mut model.queue, receiver, forward);
     let status: String = format!("Resolved {resolved} requests; {failed} errors");
@@ -132,10 +134,43 @@ fn resolve_waiting(
     }
 }
 
+fn toggle_intercept(model: &mut Model, receiver: &mut mpsc::Receiver<PendingRequest>) -> Message {
+    let enabled: bool = model.state.toggle_intercepting();
+
+    if enabled {
+        return Message::SetStatus("Intercept ON".into());
+    }
+
+    let selected_id: Option<u64> = model
+        .queue_state
+        .selected()
+        .and_then(|index| model.queue.get(index))
+        .map(|request| request.record().id);
+
+    let (forwarded, invalid) = model.queue.resolve_all(true);
+
+    // Free local capacity even if every draft is invalid before draining the channel.
+    model.queue.resolve_all(false);
+
+    let (waiting_forwarded, waiting_invalid) = resolve_all(&mut model.queue, receiver, true);
+
+    model.queue.resolve_all(false);
+
+    let forwarded: usize = forwarded + waiting_forwarded;
+    let invalid: usize = invalid + waiting_invalid;
+
+    Message::QueueChanged {
+        selected_id,
+        status: Some(format!(
+            "Intercept OFF; {forwarded} forwarded; {invalid} invalid drafts dropped"
+        )),
+    }
+}
+
 fn export_selected(model: &Model, request_export_dir: Option<&Path>) -> Message {
     let status: String = match model.current() {
         None => "No request selected".into(),
-        Some(request) => match save_request(request.raw(), request_export_dir) {
+        Some(request) => match save_request(&request.raw, request_export_dir) {
             Ok(path) => format!("Saved {}", path.display()),
             Err(error) => format!("Save failed: {error}"),
         },
@@ -147,7 +182,7 @@ fn export_selected(model: &Model, request_export_dir: Option<&Path>) -> Message 
 pub(super) async fn run(
     terminal: &mut DefaultTerminal,
     model: &mut Model,
-    receiver: &mut mpsc::Receiver<HttpInterceptPendingRequest>,
+    receiver: &mut mpsc::Receiver<PendingRequest>,
     request_export_dir: Option<&Path>,
 ) -> io::Result<Action> {
     terminal.clear()?;
@@ -156,6 +191,7 @@ pub(super) async fn run(
 
     loop {
         redraw |= receive_pending(model, receiver);
+        redraw |= model.sync_history();
 
         if redraw {
             terminal.draw(|frame| view::render(frame, model))?;
@@ -180,6 +216,10 @@ pub(super) async fn run(
 
         match effect {
             Effect::Quit => return Ok(Action::Quit),
+            Effect::ToggleIntercept => {
+                let message: Message = toggle_intercept(model, receiver);
+                update::update(model, message);
+            }
             Effect::Forward | Effect::Drop => {
                 let forward: bool = effect.is_forward();
                 let message: Message = resolve_selected(model, forward);
@@ -205,11 +245,11 @@ pub(super) async fn run(
 
                 match request.target() {
                     Ok(target) => {
-                        let raw: Vec<u8> = request.raw().to_vec();
+                        let raw: Vec<u8> = request.raw.to_vec();
 
                         let action: Action = if effect.is_edit() {
                             Action::Edit {
-                                id: request.id(),
+                                id: request.id,
                                 raw,
                                 target,
                             }
@@ -236,50 +276,50 @@ mod tests {
     use http::Request;
     use tokio::sync::oneshot;
 
+    use super::super::model::RequestList;
     use super::*;
-    use crate::http::intercept::HttpInterceptReply;
 
-    fn pending(
-        id: u64,
-    ) -> (
-        HttpInterceptPendingRequest,
-        oneshot::Receiver<HttpInterceptReply>,
-    ) {
+    fn pending(id: u64) -> (PendingRequest, oneshot::Receiver<Option<Request<Bytes>>>) {
         let (reply, receiver) = oneshot::channel();
 
         (
-            HttpInterceptPendingRequest {
+            PendingRequest::new(
                 id,
-                timestamp: Local::now(),
-                original_uri: format!("http://localhost/request-{id}").parse().unwrap(),
-                request: Request::builder()
+                Local::now(),
+                format!("http://localhost/request-{id}").parse().unwrap(),
+                Request::builder()
                     .uri(format!("/request-{id}"))
                     .body(Bytes::new())
                     .unwrap(),
                 reply,
-            },
+            )
+            .unwrap(),
             receiver,
         )
     }
 
     #[test]
     fn test_forward_after_end_uses_the_last_request() {
-        let mut model: Model = Model::new("127.0.0.1:8001".parse().unwrap());
+        let mut model: Model = Model::new("127.0.0.1:8001".parse().unwrap(), Default::default());
+        model.list = RequestList::Pending;
+
         let (first, mut first_reply) = pending(10);
         let (last, mut last_reply) = pending(20);
-        model.queue.push(first).unwrap();
-        model.queue.push(last).unwrap();
+
+        model.queue.push(first);
+        model.queue.push(last);
         model.select(0);
 
         update::update(&mut model, Message::Key(KeyEvent::from(KeyCode::End)));
         let message: Message = resolve_selected(&mut model, true);
         update::update(&mut model, message);
 
-        let HttpInterceptReply::Forward(request) = last_reply.try_recv().unwrap() else {
+        let Some(request) = last_reply.try_recv().unwrap() else {
             panic!("expected the last request to be forwarded");
         };
+
         assert_eq!(request.uri(), "/request-20");
-        assert_eq!(model.current().unwrap().id(), 10);
+        assert_eq!(model.current().unwrap().id, 10);
         assert!(matches!(
             first_reply.try_recv(),
             Err(oneshot::error::TryRecvError::Empty)
@@ -289,7 +329,10 @@ mod tests {
     #[test]
     fn test_arrivals_respect_queue_capacity() {
         let (sender, mut receiver) = mpsc::channel(2);
-        let mut model: Model = Model::new("127.0.0.1:8001".parse().unwrap());
+
+        let mut model: Model = Model::new("127.0.0.1:8001".parse().unwrap(), Default::default());
+        model.list = RequestList::Pending;
+
         for id in [10, 20] {
             let (request, _reply) = pending(id);
             sender.try_send(request).unwrap();
@@ -314,31 +357,40 @@ mod tests {
         );
         assert!(receive_pending(&mut model, &mut receiver));
 
-        assert_eq!(model.current().unwrap().id(), 20);
-        assert_eq!(model.queue.get(1).unwrap().id(), 30);
+        assert_eq!(model.current().unwrap().id, 20);
+        assert_eq!(model.queue.get(1).unwrap().record().id, 30);
         assert!(receiver.is_empty());
     }
 
     #[test]
-    fn test_forward_all_includes_waiting_arrivals() {
-        let (sender, mut receiver) = mpsc::channel(1);
-        let mut queue: RequestQueue = RequestQueue::default();
-        let (queued, mut queued_reply) = pending(10);
-        let (waiting, mut waiting_reply) = pending(20);
-        queue.push(queued).unwrap();
+    fn test_disabling_interception_resolves_drafts_and_waiting_arrivals() {
+        let (sender, mut receiver) = mpsc::channel(2);
+
+        let mut model: Model = Model::new("127.0.0.1:8001".parse().unwrap(), Default::default());
+
+        assert!(model.state.toggle_intercepting());
+
+        let (valid, mut valid_reply) = pending(10);
+        let (invalid, mut invalid_reply) = pending(20);
+        let (waiting, mut waiting_reply) = pending(30);
+
+        model.queue.push(valid);
+        model.queue.push(invalid);
+        model
+            .queue
+            .set_draft(10, b"GET /edited HTTP/1.1\r\n\r\n".to_vec());
+        model.queue.set_draft(20, b"invalid draft".to_vec());
+
         sender.try_send(waiting).unwrap();
 
-        assert_eq!(resolve_all(&mut queue, &mut receiver, true), (2, 0));
+        let message: Message = toggle_intercept(&mut model, &mut receiver);
+        update::update(&mut model, message);
 
-        assert!(queue.is_empty());
+        assert!(!model.state.is_intercepting());
+        assert!(model.queue.is_empty());
         assert!(receiver.is_empty());
-        assert!(matches!(
-            queued_reply.try_recv(),
-            Ok(HttpInterceptReply::Forward(_))
-        ));
-        assert!(matches!(
-            waiting_reply.try_recv(),
-            Ok(HttpInterceptReply::Forward(_))
-        ));
+        assert_eq!(valid_reply.try_recv().unwrap().unwrap().uri(), "/edited");
+        assert!(matches!(invalid_reply.try_recv(), Ok(None)));
+        assert!(matches!(waiting_reply.try_recv(), Ok(Some(_))));
     }
 }

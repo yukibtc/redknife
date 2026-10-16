@@ -8,8 +8,7 @@ use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::mpsc;
 
-use crate::http::intercept::HttpInterceptHandler;
-use crate::http::proxy::HttpProxyServer;
+use crate::http::proxy::{HttpProxyServer, ProxyState};
 use crate::tui::http::editor::{self, ExitLabel};
 use crate::tui::http::proxy::{Action, HttpProxyTuiSession};
 use crate::tui::terminal::TerminalSession;
@@ -22,13 +21,16 @@ pub async fn run(ip: IpAddr, port: u16, out_dir: Option<PathBuf>) -> io::Result<
 
     let (sender, receiver) = mpsc::channel(4096);
 
-    let handler: Arc<HttpInterceptHandler> = Arc::new(HttpInterceptHandler::new(sender));
-    let proxy: HttpProxyServer = HttpProxyServer::new(listener, handler);
+    // Create the HTTP proxy state, that will be shared between the interceptor and the TUI session
+    let state: Arc<ProxyState> = Arc::new(ProxyState::default());
 
-    // Keep one terminal session while switching between the interceptor and editor.
+    // Create the HTTP proxy server
+    let proxy: HttpProxyServer = HttpProxyServer::new(listener, sender, Arc::clone(&state));
+
+    // Keep one terminal session while switching between the proxy and editor.
     let mut terminal: TerminalSession = TerminalSession::new()?;
     let mut proxy_tui_session: HttpProxyTuiSession =
-        HttpProxyTuiSession::new(receiver, listen_addr);
+        HttpProxyTuiSession::new(receiver, listen_addr, state);
 
     tokio::select! {
         result = proxy.run() => result?,

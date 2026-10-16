@@ -1,3 +1,5 @@
+use std::mem;
+
 use crossterm::event::KeyCode;
 use ratatui::widgets::ListState;
 
@@ -19,7 +21,9 @@ pub(super) enum Effect {
     Repeat,
     /// Export the selected request's draft.
     Save,
-    /// Return to the caller to shut down the interceptor.
+    /// Toggle interception and resolve waiting requests when switching OFF.
+    ToggleIntercept,
+    /// Return to the caller to shut down the proxy.
     Quit,
 }
 
@@ -41,6 +45,20 @@ impl Effect {
 }
 
 pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
+    if model.list.is_history()
+        && matches!(
+            message,
+            Message::Forward
+                | Message::Drop
+                | Message::ForwardAll
+                | Message::DropAll
+                | Message::Edit
+        )
+    {
+        model.status = "History is read only".into();
+        return None;
+    }
+
     match message {
         Message::Forward => return Some(Effect::Forward),
         Message::Drop => return Some(Effect::Drop),
@@ -50,6 +68,26 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
         Message::Repeat => return Some(Effect::Repeat),
         Message::Save => return Some(Effect::Save),
         Message::Quit => return Some(Effect::Quit),
+        Message::ToggleIntercept => return Some(Effect::ToggleIntercept),
+        Message::SwitchList => {
+            let previous_id: Option<u64> = model.current().map(|request| request.id);
+            let previous_state: ListState = mem::take(&mut model.preview_state);
+
+            model.list = model.list.switch();
+
+            let selected: usize = model.list_state().selected().unwrap_or(0);
+
+            model.select(selected);
+            model.refresh_preview();
+
+            if let Some((id, state)) = model.inactive_preview.take() {
+                if model.current().is_some_and(|request| request.id == id) {
+                    model.preview_state = state;
+                }
+            }
+
+            model.inactive_preview = previous_id.map(|id| (id, previous_state));
+        }
         Message::SwitchFocus => {
             model.focus = model.focus.switch();
         }
@@ -64,9 +102,9 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
                 .and_then(|id| model.queue.index_of(id))
                 .unwrap_or(model.queue_state.selected().unwrap_or(0));
 
-            model.select(selected);
+            model.select_queue(selected);
 
-            if model.current().map(|request| request.id()) != selected_id {
+            if model.list.is_pending() && model.current().map(|request| request.id) != selected_id {
                 model.refresh_preview();
             }
 
@@ -76,7 +114,7 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
         }
         Message::Edited { id, raw } => {
             if model.queue.set_draft(id, raw) {
-                if model.current().is_some_and(|request| request.id() == id) {
+                if model.current().is_some_and(|request| request.id == id) {
                     model.refresh_preview();
                 }
 
@@ -87,13 +125,16 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
         }
         Message::Key(key) => match model.focus {
             Focus::Queue => {
-                let previous: Option<usize> = model.queue_state.selected();
+                let previous: Option<usize> = model.list_state().selected();
+                let page_size: u16 = model.queue_page_size;
 
-                navigate(&mut model.queue_state, key.code, model.queue_page_size);
+                navigate(model.list_state(), key.code, page_size);
 
-                model.select(model.queue_state.selected().unwrap_or(0));
+                let selected: usize = model.list_state().selected().unwrap_or(0);
 
-                if model.queue_state.selected() != previous {
+                model.select(selected);
+
+                if model.list_state().selected() != previous {
                     model.refresh_preview();
                 }
             }
@@ -120,29 +161,47 @@ fn navigate(state: &mut ListState, key: KeyCode, page_size: u16) {
 mod tests {
     use bytes::Bytes;
     use chrono::Local;
+    use crossterm::event::KeyEvent;
     use http::Request;
     use tokio::sync::oneshot;
 
+    use super::super::model::RequestList;
     use super::*;
-    use crate::http::intercept::HttpInterceptPendingRequest;
+    use crate::http::proxy::{PendingRequest, RequestRecord, RequestStatus};
 
     fn model() -> Model {
-        let mut model: Model = Model::new("127.0.0.1:8001".parse().unwrap());
+        let mut model: Model = Model::new("127.0.0.1:8001".parse().unwrap(), Default::default());
+        model.list = RequestList::Pending;
+
         for id in [10, 20, 30] {
             let (reply, _receiver) = oneshot::channel();
-            let request: HttpInterceptPendingRequest = HttpInterceptPendingRequest {
+
+            let request: PendingRequest = PendingRequest::new(
                 id,
-                timestamp: Local::now(),
-                original_uri: "http://localhost/".parse().unwrap(),
-                request: Request::new(Bytes::new()),
+                Local::now(),
+                "http://localhost/".parse().unwrap(),
+                Request::new(Bytes::new()),
                 reply,
-            };
-            model.queue.push(request).unwrap();
+            )
+            .unwrap();
+
+            model.queue.push(request);
         }
+
         model.select(1);
         model.refresh_preview();
 
         model
+    }
+
+    fn record(model: &Model, id: u64) {
+        model.state.record(RequestRecord {
+            id,
+            timestamp: Local::now(),
+            original_uri: format!("http://localhost/history-{id}").parse().unwrap(),
+            raw: format!("GET /history-{id} HTTP/1.1\r\nHost: localhost\r\n\r\n").into(),
+            status: RequestStatus::Forwarded,
+        });
     }
 
     #[test]
@@ -158,7 +217,7 @@ mod tests {
             },
         );
 
-        assert_eq!(model.current().unwrap().id(), 20);
+        assert_eq!(model.current().unwrap().id, 20);
         assert_eq!(model.queue_state.selected(), Some(0));
 
         model.queue.resolve(0, false).unwrap();
@@ -170,7 +229,7 @@ mod tests {
             },
         );
 
-        assert_eq!(model.current().unwrap().id(), 30);
+        assert_eq!(model.current().unwrap().id, 30);
 
         model.queue.resolve_all(false);
         update(
@@ -197,8 +256,96 @@ mod tests {
             },
         );
 
-        assert_eq!(model.queue.get(0).unwrap().raw(), raw);
-        assert_eq!(model.current().unwrap().id(), 20);
+        assert_eq!(model.queue.get(0).unwrap().record().raw, raw);
+        assert_eq!(model.current().unwrap().id, 20);
         assert_eq!(model.queue.len(), 3);
+    }
+
+    #[test]
+    fn test_switching_lists_preserves_independent_selections_and_scroll() {
+        let mut model: Model = model();
+
+        *model.queue_state.offset_mut() = 1;
+        model.preview_state.select(Some(1));
+
+        record(&model, 100);
+        record(&model, 200);
+
+        model.sync_history();
+
+        update(&mut model, Message::from_key(KeyEvent::from(KeyCode::F(2))));
+
+        assert_eq!(model.current().unwrap().id, 100);
+
+        update(&mut model, Message::Key(KeyEvent::from(KeyCode::Down)));
+
+        *model.history_state.offset_mut() = 1;
+        model.preview_state.select(Some(2));
+
+        update(&mut model, Message::SwitchFocus);
+        update(&mut model, Message::SwitchList);
+
+        assert_eq!(model.current().unwrap().id, 20);
+        assert_eq!(model.queue_state.offset(), 1);
+        assert_eq!(model.preview_state.selected(), Some(1));
+        assert_eq!(model.focus, Focus::Preview);
+
+        update(&mut model, Message::SwitchList);
+
+        assert_eq!(model.current().unwrap().id, 200);
+        assert_eq!(model.history_state.offset(), 1);
+        assert_eq!(model.preview_state.selected(), Some(2));
+    }
+
+    #[test]
+    fn test_history_arrivals_preserve_selection_and_preview_when_inserted_before_it() {
+        let mut model: Model = model();
+
+        record(&model, 200);
+
+        model.sync_history();
+
+        update(&mut model, Message::SwitchList);
+
+        model.preview_state.select(Some(2));
+
+        record(&model, 100);
+
+        assert!(model.sync_history());
+
+        assert_eq!(model.current().unwrap().id, 200);
+        assert_eq!(model.history_state.selected(), Some(1));
+        assert_eq!(model.preview_state.selected(), Some(2));
+    }
+
+    #[test]
+    fn test_history_blocks_pending_actions_but_allows_repeat_save_and_toggle() {
+        let mut model: Model = model();
+
+        update(&mut model, Message::SwitchList);
+
+        for key in [
+            KeyCode::Enter,
+            KeyCode::F(5),
+            KeyCode::F(6),
+            KeyCode::F(7),
+            KeyCode::F(8),
+        ] {
+            assert!(update(&mut model, Message::from_key(KeyEvent::from(key))).is_none());
+            assert_eq!(model.queue.len(), 3);
+        }
+
+        assert!(matches!(
+            update(&mut model, Message::Repeat),
+            Some(Effect::Repeat)
+        ));
+        assert!(matches!(
+            update(&mut model, Message::Save),
+            Some(Effect::Save)
+        ));
+        assert!(matches!(
+            update(&mut model, Message::from_key(KeyEvent::from(KeyCode::F(9)))),
+            Some(Effect::ToggleIntercept)
+        ));
     }
 }

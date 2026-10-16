@@ -6,58 +6,81 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, List, ListItem, Paragraph, Wrap};
 
-use super::model::{Focus, Model, escaped_line};
+use super::model::{Focus, Model, RequestList, escaped_line};
+use crate::http::proxy::{RequestRecord, RequestStatus};
 use crate::tui::constant::APP_NAME;
 use crate::tui::theme;
 use crate::tui::widgets::panel;
 
+fn request_item(request: &RequestRecord) -> ListItem<'static> {
+    let method: &[u8] = request
+        .raw
+        .split(|byte| *byte == b' ')
+        .next()
+        .unwrap_or_default();
+
+    let method: String = escaped_line(method).chars().take(20).collect();
+
+    let mut label: String = format!(
+        "#{} {} {} ({} B)",
+        request.id,
+        request.timestamp.format("%H:%M:%S"),
+        method,
+        request.raw.len()
+    );
+
+    if request.status != RequestStatus::Pending {
+        label.push_str(" · ");
+        label.push_str(request.status.as_str());
+    }
+
+    let uri: String = request.original_uri.to_string().escape_debug().to_string();
+
+    ListItem::new(vec![Line::raw(label), Line::raw(uri)])
+}
+
 fn render_queue(frame: &mut Frame, area: Rect, model: &mut Model) {
-    let block: Block = panel("Pending requests", model.focus.is_queue());
+    let title: &str = match model.list {
+        RequestList::Pending => "Pending requests",
+        RequestList::History => "History",
+    };
+
+    let block: Block = panel(title, model.focus.is_queue());
     let inner: Rect = block.inner(area);
 
     model.queue_page_size = (inner.height / 2).max(1);
 
-    if model.queue.is_empty() {
-        frame.render_widget(
-            Paragraph::new("Waiting for HTTP requests").block(block),
-            area,
-        );
+    let items: Vec<ListItem> = match model.list {
+        RequestList::Pending => model
+            .queue
+            .iter()
+            .map(|request| request_item(request.record()))
+            .collect(),
+        RequestList::History => model
+            .history
+            .iter()
+            .map(|entry| request_item(entry))
+            .collect(),
+    };
+
+    if items.is_empty() {
+        let text: &str = match model.list {
+            RequestList::Pending if !model.state.is_intercepting() => {
+                "Intercept is OFF, requests pass automatically."
+            }
+            RequestList::Pending => "Waiting for HTTP requests",
+            RequestList::History => "No resolved HTTP requests",
+        };
+        frame.render_widget(Paragraph::new(text).block(block), area);
         return;
     }
-
-    let items: Vec<ListItem> = model
-        .queue
-        .iter()
-        .map(|request| {
-            let method: &[u8] = request
-                .raw()
-                .split(|byte| *byte == b' ')
-                .next()
-                .unwrap_or_default();
-            let method: String = escaped_line(method).chars().take(20).collect();
-            let label: String = format!(
-                "#{} {} {} ({} B)",
-                request.id(),
-                request.timestamp().format("%H:%M:%S"),
-                method,
-                request.raw().len()
-            );
-            let uri: String = request
-                .original_uri()
-                .to_string()
-                .escape_debug()
-                .to_string();
-
-            ListItem::new(vec![Line::raw(label), Line::raw(uri)])
-        })
-        .collect();
 
     let list: List = List::new(items)
         .block(block)
         .highlight_style(theme::selection())
         .highlight_symbol("> ");
 
-    frame.render_stateful_widget(list, area, &mut model.queue_state);
+    frame.render_stateful_widget(list, area, model.list_state());
 }
 
 fn render_preview(frame: &mut Frame, area: Rect, model: &mut Model) {
@@ -89,9 +112,15 @@ pub(super) fn render(frame: &mut Frame, model: &mut Model) {
         .areas(frame.area());
 
     let heading: String = format!(
-        "{APP_NAME} / HTTP / PROXY · {} · {} pending",
+        "{APP_NAME} / HTTP / PROXY · {} · Intercept {} · {} pending · {} history",
         model.address,
-        model.queue.len()
+        if model.state.is_intercepting() {
+            "ON"
+        } else {
+            "OFF"
+        },
+        model.queue.len(),
+        model.history.len()
     );
 
     frame.render_widget(
@@ -116,8 +145,15 @@ pub(super) fn render(frame: &mut Frame, model: &mut Model) {
         render_preview(frame, preview, model);
     }
 
-    frame.render_widget(Paragraph::new(
-        "↑/↓ Select · Tab Preview · Enter Edit · R Go to Repeater\nF5 Forward · F6 Drop · F7 Forward All · F8 Drop All\nCtrl+S Save · Ctrl+Q Quit"
-    ).wrap(Wrap { trim: true }), help_area);
+    let help: &str = match model.list {
+        RequestList::Pending => {
+            "↑/↓ Select · Tab Preview · Enter Edit · R Go to Repeater\nF5 Forward · F6 Drop · F7 Forward All · F8 Drop All\nF2 History · F9 Intercept ON/OFF · Ctrl+S Save · Ctrl+Q Quit"
+        }
+        RequestList::History => {
+            "↑/↓ Select · Tab Preview · R Go to Repeater\nF2 Pending · F9 Intercept ON/OFF\nCtrl+S Save · Ctrl+Q Quit"
+        }
+    };
+
+    frame.render_widget(Paragraph::new(help).wrap(Wrap { trim: true }), help_area);
     frame.render_widget(Paragraph::new(model.status.as_str()), status_area);
 }

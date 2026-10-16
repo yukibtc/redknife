@@ -39,6 +39,7 @@
 - Add LDAP Server
 - TUI for HTTP Repeater
 - HTTP Intercept to Repeater functionally
+- HTTP Proxy history
 - Automatic HTTP request and response unpacking (gzip, deflate, Brotli, and zstd)
 
 ## 0.2.0 - 2026/10/12

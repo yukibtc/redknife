@@ -1,8 +1,9 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use ratatui::widgets::{List, ListState};
 
-use crate::http::intercept::{QueuedRequest, RequestQueue};
+use crate::http::proxy::{ProxyState, RequestQueue, RequestRecord};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Focus {
@@ -29,13 +30,47 @@ impl Focus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RequestList {
+    Pending,
+    History,
+}
+
+impl RequestList {
+    #[inline]
+    pub(super) fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    #[inline]
+    pub(super) fn is_history(&self) -> bool {
+        matches!(self, Self::History)
+    }
+
+    #[inline]
+    pub(super) fn switch(&self) -> Self {
+        match self {
+            Self::Pending => Self::History,
+            Self::History => Self::Pending,
+        }
+    }
+}
+
 pub(super) struct Model {
+    pub(super) state: Arc<ProxyState>,
+    pub(super) list: RequestList,
+    pub(super) history: Vec<Arc<RequestRecord>>,
+    pub(super) history_state: ListState,
     pub(super) queue: RequestQueue,
     pub(super) queue_state: ListState,
     pub(super) focus: Focus,
     /// Request preview lines, prepared only when the selection or its draft changes.
     pub(super) preview: List<'static>,
     pub(super) preview_state: ListState,
+    /// Saves the selected request ID and preview scroll position when switching
+    /// between different lists (history, pending). Restores the position when switching back,
+    /// provided the same request is still selected.
+    pub(super) inactive_preview: Option<(u64, ListState)>,
     /// Visible item counts recorded by the view for PageUp and PageDown.
     pub(super) queue_page_size: u16,
     pub(super) preview_page_size: u16,
@@ -45,13 +80,18 @@ pub(super) struct Model {
 }
 
 impl Model {
-    pub(super) fn new(address: SocketAddr) -> Self {
+    pub(super) fn new(address: SocketAddr, state: Arc<ProxyState>) -> Self {
         Self {
+            state,
+            list: RequestList::History,
+            history: Vec::new(),
+            history_state: ListState::default(),
             queue: RequestQueue::default(),
             queue_state: ListState::default(),
             focus: Focus::Queue,
             preview: List::default(),
             preview_state: ListState::default(),
+            inactive_preview: None,
             queue_page_size: 1,
             preview_page_size: 1,
             address,
@@ -59,14 +99,30 @@ impl Model {
         }
     }
 
-    #[inline]
-    pub(super) fn current(&self) -> Option<&QueuedRequest> {
-        self.queue_state
-            .selected()
-            .and_then(|index| self.queue.get(index))
+    pub(super) fn current(&self) -> Option<&RequestRecord> {
+        match self.list {
+            RequestList::Pending => self
+                .queue_state
+                .selected()
+                .and_then(|index| self.queue.get(index))
+                .map(|request| request.record()),
+            RequestList::History => self
+                .history_state
+                .selected()
+                .and_then(|index| self.history.get(index))
+                .map(|entry| entry.as_ref()),
+        }
     }
 
-    pub(super) fn select(&mut self, index: usize) {
+    #[inline]
+    pub(super) fn list_state(&mut self) -> &mut ListState {
+        match self.list {
+            RequestList::Pending => &mut self.queue_state,
+            RequestList::History => &mut self.history_state,
+        }
+    }
+
+    pub(super) fn select_queue(&mut self, index: usize) {
         let selected: Option<usize> = if self.queue.is_empty() {
             None
         } else {
@@ -76,11 +132,52 @@ impl Model {
         self.queue_state.select(selected);
     }
 
+    pub(super) fn select(&mut self, index: usize) {
+        match self.list {
+            RequestList::Pending => self.select_queue(index),
+            RequestList::History => {
+                let selected: Option<usize> = if self.history.is_empty() {
+                    None
+                } else {
+                    Some(index.min(self.history.len() - 1))
+                };
+                self.history_state.select(selected);
+            }
+        }
+    }
+
+    /// Returns `true` if the history has been updated.
+    pub(super) fn sync_history(&mut self) -> bool {
+        let Some(history) = self.state.history_since(self.history.len()) else {
+            return false;
+        };
+
+        let selected_id: Option<u64> = self
+            .history_state
+            .selected()
+            .and_then(|index| self.history.get(index))
+            .map(|entry| entry.id);
+
+        let selected: Option<usize> = selected_id
+            .and_then(|id| history.iter().position(|entry| entry.id == id))
+            .or_else(|| (!history.is_empty()).then_some(0));
+
+        self.history = history;
+
+        self.history_state.select(selected);
+
+        if self.list.is_history() && self.current().map(|request| request.id) != selected_id {
+            self.refresh_preview();
+        }
+
+        true
+    }
+
     /// Replace the cached preview when its source changes, starting at the first line.
     pub(super) fn refresh_preview(&mut self) {
         let lines: Vec<String> = match self.current() {
             Some(request) => request
-                .raw()
+                .raw
                 .split(|byte| *byte == b'\n')
                 .map(|line| {
                     let line: &[u8] = line.strip_suffix(b"\r").unwrap_or(line);

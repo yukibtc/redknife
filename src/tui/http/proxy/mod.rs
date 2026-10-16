@@ -1,6 +1,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Arc;
 
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
@@ -13,7 +14,7 @@ mod view;
 
 use self::message::Message;
 use self::model::Model;
-use crate::http::intercept::HttpInterceptPendingRequest;
+use crate::http::proxy::{PendingRequest, ProxyState};
 use crate::http::target::HttpTarget;
 
 pub(crate) enum Action {
@@ -31,17 +32,18 @@ pub(crate) enum Action {
 
 pub(crate) struct HttpProxyTuiSession {
     model: Model,
-    receiver: mpsc::Receiver<HttpInterceptPendingRequest>,
+    receiver: mpsc::Receiver<PendingRequest>,
 }
 
 impl HttpProxyTuiSession {
     /// Start an empty screen for a proxy already sending requests to this receiver.
     pub(crate) fn new(
-        receiver: mpsc::Receiver<HttpInterceptPendingRequest>,
+        receiver: mpsc::Receiver<PendingRequest>,
         address: SocketAddr,
+        state: Arc<ProxyState>,
     ) -> Self {
         Self {
-            model: Model::new(address),
+            model: Model::new(address, state),
             receiver,
         }
     }
