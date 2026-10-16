@@ -27,7 +27,7 @@
 
 -->
 
-## Unreleased
+## 0.3.0 - 2026/10/16
 
 ### Breaking change
 
