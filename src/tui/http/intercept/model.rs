@@ -33,7 +33,7 @@ pub(super) struct Model {
     pub(super) queue: RequestQueue,
     pub(super) queue_state: ListState,
     pub(super) focus: Focus,
-    /// Escaped request lines, prepared only when the selection or its draft changes.
+    /// Request preview lines, prepared only when the selection or its draft changes.
     pub(super) preview: List<'static>,
     pub(super) preview_state: ListState,
     /// Visible item counts recorded by the view for PageUp and PageDown.
@@ -98,10 +98,17 @@ impl Model {
 
 #[inline]
 pub(super) fn escaped_line(raw: &[u8]) -> String {
-    raw.iter()
-        .flat_map(|byte| byte.escape_ascii())
-        .map(char::from)
-        .collect()
+    let mut line: String = String::new();
+
+    for &byte in raw {
+        match byte {
+            b'\t' => line.push_str("    "),
+            b' '..=b'~' => line.push(char::from(byte)),
+            _ => line.extend(byte.escape_ascii().map(char::from)),
+        }
+    }
+
+    line
 }
 
 #[cfg(test)]
@@ -111,5 +118,17 @@ mod tests {
     #[test]
     fn test_preview_escapes_control_and_binary_bytes() {
         assert_eq!(escaped_line(b"hello\x1b\x00\xff"), "hello\\x1b\\x00\\xff");
+    }
+
+    #[test]
+    fn test_preview_preserves_json_text() {
+        assert_eq!(
+            escaped_line(b"\t\"username\": \"test\""),
+            "    \"username\": \"test\""
+        );
+        assert_eq!(
+            escaped_line(br#"{"value": "it's \t"}"#),
+            r#"{"value": "it's \t"}"#
+        );
     }
 }
