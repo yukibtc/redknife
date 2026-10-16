@@ -2,6 +2,7 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, BorderType};
 
 pub(super) mod hex_view;
+pub(super) mod scroll;
 
 use super::theme;
 

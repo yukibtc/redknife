@@ -1,5 +1,3 @@
-use std::mem;
-
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -11,8 +9,9 @@ use crate::http::proxy::{RequestRecord, RequestStatus};
 use crate::tui::constant::APP_NAME;
 use crate::tui::theme;
 use crate::tui::widgets::panel;
+use crate::tui::widgets::scroll::clipped_line;
 
-fn request_item(request: &RequestRecord) -> ListItem<'static> {
+fn request_lines(request: &RequestRecord) -> [String; 2] {
     let method: &[u8] = request
         .raw
         .split(|byte| *byte == b' ')
@@ -36,7 +35,7 @@ fn request_item(request: &RequestRecord) -> ListItem<'static> {
 
     let uri: String = request.original_uri.to_string().escape_debug().to_string();
 
-    ListItem::new(vec![Line::raw(label), Line::raw(uri)])
+    [label, uri]
 }
 
 fn render_queue(frame: &mut Frame, area: Rect, model: &mut Model) {
@@ -50,30 +49,54 @@ fn render_queue(frame: &mut Frame, area: Rect, model: &mut Model) {
 
     model.queue_page_size = (inner.height / 2).max(1);
 
-    let items: Vec<ListItem> = match model.list {
+    let rows: Vec<[String; 2]> = match model.list {
         RequestList::Pending => model
             .queue
             .iter()
-            .map(|request| request_item(request.record()))
+            .map(|request| request_lines(request.record()))
             .collect(),
         RequestList::History => model
             .history
             .iter()
-            .map(|entry| request_item(entry))
+            .map(|entry| request_lines(entry))
             .collect(),
     };
 
-    if items.is_empty() {
+    if rows.is_empty() {
         let text: &str = match model.list {
-            RequestList::Pending if !model.state.is_intercepting() => {
-                "Intercept is OFF, requests pass automatically."
-            }
+            RequestList::Pending if !model.state.is_intercepting() => "Intercept OFF",
             RequestList::Pending => "Waiting for HTTP requests",
             RequestList::History => "No resolved HTTP requests",
         };
         frame.render_widget(Paragraph::new(text).block(block), area);
         return;
     }
+
+    let width = inner.width.saturating_sub(2); // Keep the selection marker fixed.
+
+    let max_width: usize = model
+        .list_state()
+        .selected()
+        .and_then(|index| rows.get(index))
+        .into_iter()
+        .flatten()
+        .map(|line| Line::raw(line.as_str()).width())
+        .max()
+        .unwrap_or(0);
+
+    if !inner.is_empty() {
+        model.list_scroll().resize(width, max_width);
+    }
+
+    let offset = model.list_scroll().offset;
+    let items = rows.iter().map(|lines| {
+        ListItem::new(
+            lines
+                .iter()
+                .map(|line| Line::raw(clipped_line(line, offset, width)))
+                .collect::<Vec<_>>(),
+        )
+    });
 
     let list: List = List::new(items)
         .block(block)
@@ -87,18 +110,16 @@ fn render_preview(frame: &mut Frame, area: Rect, model: &mut Model) {
     let block: Block = panel("Request preview (read only)", model.focus.is_preview());
     let inner: Rect = block.inner(area);
 
-    model.preview_page_size = inner.height.max(1);
-
     let style: Style = if model.focus.is_preview() {
         theme::selection()
     } else {
         Style::default()
     };
 
-    model.preview = mem::take(&mut model.preview).highlight_style(style);
-
     frame.render_widget(block, area);
-    frame.render_stateful_widget(&model.preview, inner, &mut model.preview_state);
+    model
+        .preview
+        .render(inner, frame.buffer_mut(), &mut model.preview_state, style);
 }
 
 pub(super) fn render(frame: &mut Frame, model: &mut Model) {

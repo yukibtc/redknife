@@ -1,66 +1,58 @@
 //! Read-only hex dumps backed by Ratatui's list navigation and scrolling.
 
 use std::fmt::Write;
-use std::mem;
 
-use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{List, ListState, StatefulWidget, Widget};
+use ratatui::widgets::{ListState, Widget};
+
+use super::scroll::ScrollableLines;
 
 const BYTES_PER_ROW: usize = 16;
 
 pub struct HexView<'a> {
-    rows: List<'a>,
+    rows: ScrollableLines<'a>,
     state: ListState,
-    page_size: u16,
+    highlight: Style,
 }
 
 impl<'a> HexView<'a> {
     pub fn new(bytes: &[u8]) -> Self {
-        let rows: List<'a> = List::new(
+        let rows = ScrollableLines::new(
             bytes
                 .chunks(BYTES_PER_ROW)
                 .enumerate()
-                .map(|(index, chunk)| format_row(index * BYTES_PER_ROW, chunk)),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+                .map(|(index, chunk)| format_row(index * BYTES_PER_ROW, chunk))
+                .collect(),
+        );
         let selected: Option<usize> = if bytes.is_empty() { None } else { Some(0) };
 
         Self {
             rows,
             state: ListState::default().with_selected(selected),
-            page_size: 1,
+            highlight: Style::default().add_modifier(Modifier::REVERSED),
         }
     }
 
     /// Override the current row's style; the default uses reversed colors.
     #[inline]
     pub fn set_highlight_style(&mut self, style: Style) {
-        self.rows = mem::take(&mut self.rows).highlight_style(style);
+        self.highlight = style;
     }
 
     /// Navigate the dump without exposing or modifying the source bytes.
-    pub fn input(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Up => self.state.select_previous(),
-            KeyCode::Down => self.state.select_next(),
-            KeyCode::Home => self.state.select_first(),
-            KeyCode::End => self.state.select_last(),
-            KeyCode::PageUp => self.state.scroll_up_by(self.page_size),
-            KeyCode::PageDown => self.state.scroll_down_by(self.page_size),
-            _ => {}
-        }
+    #[inline]
+    pub fn input(&mut self, key: KeyEvent) {
+        self.rows.input(key, &mut self.state);
     }
 }
 
 impl<'a> Widget for &mut HexView<'a> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
-        self.page_size = area.height.max(1);
-
-        // List highlights the selected row and keeps it visible while navigating.
-        StatefulWidget::render(&self.rows, area, buffer, &mut self.state);
+        self.rows
+            .render(area, buffer, &mut self.state, self.highlight);
     }
 }
 
@@ -92,6 +84,8 @@ fn format_row(offset: usize, bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crossterm::event::KeyCode;
+
     use super::*;
 
     #[test]
@@ -115,7 +109,7 @@ mod tests {
 
         assert!(buffer[(0, 0)].modifier.contains(Modifier::REVERSED));
 
-        view.input(KeyCode::Down);
+        view.input(KeyEvent::from(KeyCode::Down));
         buffer.reset();
         (&mut view).render(area, &mut buffer);
 

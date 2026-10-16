@@ -1,10 +1,10 @@
 use std::mem;
 
-use crossterm::event::KeyCode;
 use ratatui::widgets::ListState;
 
 use super::message::Message;
 use super::model::{Focus, Model};
+use crate::tui::widgets::scroll::navigate;
 
 pub(super) enum Effect {
     /// Forward the selected request, including any draft edits.
@@ -72,21 +72,28 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
         Message::SwitchList => {
             let previous_id: Option<u64> = model.current().map(|request| request.id);
             let previous_state: ListState = mem::take(&mut model.preview_state);
+            let previous_horizontal = model.preview.horizontal;
 
             model.list = model.list.switch();
 
             let selected: usize = model.list_state().selected().unwrap_or(0);
 
             model.select(selected);
-            model.refresh_preview();
 
-            if let Some((id, state)) = model.inactive_preview.take() {
+            let list_horizontal = *model.list_scroll();
+
+            model.refresh_preview();
+            *model.list_scroll() = list_horizontal;
+
+            if let Some((id, state, horizontal)) = model.inactive_preview.take() {
                 if model.current().is_some_and(|request| request.id == id) {
                     model.preview_state = state;
+                    model.preview.horizontal = horizontal;
                 }
             }
 
-            model.inactive_preview = previous_id.map(|id| (id, previous_state));
+            model.inactive_preview =
+                previous_id.map(|id| (id, previous_state, previous_horizontal));
         }
         Message::SwitchFocus => {
             model.focus = model.focus.switch();
@@ -104,6 +111,16 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
 
             model.select_queue(selected);
 
+            let queue_id: Option<u64> = model
+                .queue_state
+                .selected()
+                .and_then(|index| model.queue.get(index))
+                .map(|request| request.record().id);
+
+            if queue_id != selected_id {
+                model.queue_scroll.offset = 0;
+            }
+
             if model.list.is_pending() && model.current().map(|request| request.id) != selected_id {
                 model.refresh_preview();
             }
@@ -114,6 +131,14 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
         }
         Message::Edited { id, raw } => {
             if model.queue.set_draft(id, raw) {
+                if model
+                    .inactive_preview
+                    .as_ref()
+                    .is_some_and(|(previous_id, _, _)| *previous_id == id)
+                {
+                    model.inactive_preview = None;
+                }
+
                 if model.current().is_some_and(|request| request.id == id) {
                     model.refresh_preview();
                 }
@@ -125,6 +150,10 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
         }
         Message::Key(key) => match model.focus {
             Focus::Queue => {
+                if model.list_scroll().input(key) {
+                    return None;
+                }
+
                 let previous: Option<usize> = model.list_state().selected();
                 let page_size: u16 = model.queue_page_size;
 
@@ -138,30 +167,18 @@ pub(super) fn update(model: &mut Model, message: Message) -> Option<Effect> {
                     model.refresh_preview();
                 }
             }
-            Focus::Preview => navigate(&mut model.preview_state, key.code, model.preview_page_size),
+            Focus::Preview => model.preview.input(key, &mut model.preview_state),
         },
     }
 
     None
 }
 
-fn navigate(state: &mut ListState, key: KeyCode, page_size: u16) {
-    match key {
-        KeyCode::Up => state.select_previous(),
-        KeyCode::Down => state.select_next(),
-        KeyCode::Home => state.select_first(),
-        KeyCode::End => state.select_last(),
-        KeyCode::PageUp => state.scroll_up_by(page_size),
-        KeyCode::PageDown => state.scroll_down_by(page_size),
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
     use chrono::Local;
-    use crossterm::event::KeyEvent;
+    use crossterm::event::{KeyCode, KeyEvent};
     use http::Request;
     use tokio::sync::oneshot;
 
@@ -207,6 +224,8 @@ mod tests {
     #[test]
     fn test_queue_changes_preserve_selection_by_id() {
         let mut model: Model = model();
+        model.queue_scroll.offset = 8;
+        model.preview.horizontal.offset = 12;
         model.queue.resolve(0, false).unwrap();
 
         update(
@@ -219,6 +238,8 @@ mod tests {
 
         assert_eq!(model.current().unwrap().id, 20);
         assert_eq!(model.queue_state.selected(), Some(0));
+        assert_eq!(model.queue_scroll.offset, 8);
+        assert_eq!(model.preview.horizontal.offset, 12);
 
         model.queue.resolve(0, false).unwrap();
         update(
@@ -230,6 +251,8 @@ mod tests {
         );
 
         assert_eq!(model.current().unwrap().id, 30);
+        assert_eq!(model.queue_scroll.offset, 0);
+        assert_eq!(model.preview.horizontal.offset, 0);
 
         model.queue.resolve_all(false);
         update(
@@ -267,6 +290,8 @@ mod tests {
 
         *model.queue_state.offset_mut() = 1;
         model.preview_state.select(Some(1));
+        model.preview.horizontal.offset = 12;
+        model.queue_scroll.offset = 8;
 
         record(&model, 100);
         record(&model, 200);
@@ -281,6 +306,8 @@ mod tests {
 
         *model.history_state.offset_mut() = 1;
         model.preview_state.select(Some(2));
+        model.preview.horizontal.offset = 7;
+        model.history_scroll.offset = 5;
 
         update(&mut model, Message::SwitchFocus);
         update(&mut model, Message::SwitchList);
@@ -288,6 +315,8 @@ mod tests {
         assert_eq!(model.current().unwrap().id, 20);
         assert_eq!(model.queue_state.offset(), 1);
         assert_eq!(model.preview_state.selected(), Some(1));
+        assert_eq!(model.preview.horizontal.offset, 12);
+        assert_eq!(model.queue_scroll.offset, 8);
         assert_eq!(model.focus, Focus::Preview);
 
         update(&mut model, Message::SwitchList);
@@ -295,6 +324,49 @@ mod tests {
         assert_eq!(model.current().unwrap().id, 200);
         assert_eq!(model.history_state.offset(), 1);
         assert_eq!(model.preview_state.selected(), Some(2));
+        assert_eq!(model.preview.horizontal.offset, 7);
+        assert_eq!(model.history_scroll.offset, 5);
+    }
+
+    #[test]
+    fn test_selection_and_draft_changes_reset_horizontal_scroll() {
+        let mut model = model();
+        model.preview.horizontal.offset = 10;
+        model.queue_scroll.offset = 8;
+
+        update(&mut model, Message::Key(KeyEvent::from(KeyCode::Down)));
+
+        assert_eq!(model.current().unwrap().id, 30);
+        assert_eq!(model.preview.horizontal.offset, 0);
+        assert_eq!(model.queue_scroll.offset, 0);
+
+        model.preview.horizontal.offset = 10;
+        model.preview_state.select(Some(2));
+        update(
+            &mut model,
+            Message::Edited {
+                id: 30,
+                raw: b"GET /edited HTTP/1.1\r\n\r\n".to_vec(),
+            },
+        );
+
+        assert_eq!(model.preview.horizontal.offset, 0);
+        assert_eq!(model.preview_state.selected(), Some(0));
+
+        // A draft updated while History is visible must not restore stale positions.
+        model.preview.horizontal.offset = 10;
+        update(&mut model, Message::SwitchList);
+        update(
+            &mut model,
+            Message::Edited {
+                id: 30,
+                raw: b"GET /again HTTP/1.1\r\n\r\n".to_vec(),
+            },
+        );
+        update(&mut model, Message::SwitchList);
+
+        assert_eq!(model.preview.horizontal.offset, 0);
+        assert_eq!(model.preview_state.selected(), Some(0));
     }
 
     #[test]

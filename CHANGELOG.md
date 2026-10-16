@@ -27,6 +27,12 @@
 
 -->
 
+## Unreleased
+
+### Fixed
+
+- Add horizontal scrolling to HTTP proxy previews, request lists, and hex views
+
 ## 0.3.0 - 2026/10/16
 
 ### Breaking change

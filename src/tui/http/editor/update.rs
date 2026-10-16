@@ -117,7 +117,7 @@ fn handle_key(model: &mut Model, key: KeyEvent) {
         }
         Focus::Request => {
             if model.hex || !model.request.is_editable() {
-                model.request.hex_view().input(key.code);
+                model.request.hex_view().input(key);
             } else {
                 model.request.input(key, true);
             }
@@ -125,7 +125,7 @@ fn handle_key(model: &mut Model, key: KeyEvent) {
         Focus::Response => {
             if let Some(response) = &mut model.response {
                 if model.hex || !response.is_editable() {
-                    response.hex_view().input(key.code);
+                    response.hex_view().input(key);
                 } else {
                     response.input(key, false);
                 }

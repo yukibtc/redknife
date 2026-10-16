@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use ratatui::widgets::{List, ListState};
+use ratatui::widgets::ListState;
 
 use crate::http::proxy::{ProxyState, RequestQueue, RequestRecord};
+use crate::tui::widgets::scroll::{HorizontalScroll, ScrollableLines};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Focus {
@@ -65,15 +66,16 @@ pub(super) struct Model {
     pub(super) queue_state: ListState,
     pub(super) focus: Focus,
     /// Request preview lines, prepared only when the selection or its draft changes.
-    pub(super) preview: List<'static>,
+    pub(super) preview: ScrollableLines<'static>,
     pub(super) preview_state: ListState,
     /// Saves the selected request ID and preview scroll position when switching
     /// between different lists (history, pending). Restores the position when switching back,
     /// provided the same request is still selected.
-    pub(super) inactive_preview: Option<(u64, ListState)>,
+    pub(super) inactive_preview: Option<(u64, ListState, HorizontalScroll)>,
+    pub(super) queue_scroll: HorizontalScroll,
+    pub(super) history_scroll: HorizontalScroll,
     /// Visible item counts recorded by the view for PageUp and PageDown.
     pub(super) queue_page_size: u16,
-    pub(super) preview_page_size: u16,
     pub(super) address: SocketAddr,
     /// Informational or error text displayed in the footer.
     pub(super) status: String,
@@ -89,11 +91,12 @@ impl Model {
             queue: RequestQueue::default(),
             queue_state: ListState::default(),
             focus: Focus::Queue,
-            preview: List::default(),
+            preview: ScrollableLines::default(),
             preview_state: ListState::default(),
             inactive_preview: None,
+            queue_scroll: HorizontalScroll::default(),
+            history_scroll: HorizontalScroll::default(),
             queue_page_size: 1,
-            preview_page_size: 1,
             address,
             status: "Waiting for HTTP requests".into(),
         }
@@ -119,6 +122,14 @@ impl Model {
         match self.list {
             RequestList::Pending => &mut self.queue_state,
             RequestList::History => &mut self.history_state,
+        }
+    }
+
+    #[inline]
+    pub(super) fn list_scroll(&mut self) -> &mut HorizontalScroll {
+        match self.list {
+            RequestList::Pending => &mut self.queue_scroll,
+            RequestList::History => &mut self.history_scroll,
         }
     }
 
@@ -188,8 +199,10 @@ impl Model {
         };
         let selected: Option<usize> = if lines.is_empty() { None } else { Some(0) };
 
-        self.preview = List::new(lines);
+        self.preview = ScrollableLines::new(lines);
         self.preview_state = ListState::default().with_selected(selected);
+
+        self.list_scroll().offset = 0;
     }
 }
 
