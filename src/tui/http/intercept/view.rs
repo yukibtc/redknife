@@ -1,3 +1,5 @@
+use std::mem;
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -63,6 +65,14 @@ fn render_preview(frame: &mut Frame, area: Rect, model: &mut Model) {
     let inner: Rect = block.inner(area);
 
     model.preview_page_size = inner.height.max(1);
+
+    let style: Style = if model.focus.is_preview() {
+        theme::selection()
+    } else {
+        Style::default()
+    };
+
+    model.preview = mem::take(&mut model.preview).highlight_style(style);
 
     frame.render_widget(block, area);
     frame.render_stateful_widget(&model.preview, inner, &mut model.preview_state);
