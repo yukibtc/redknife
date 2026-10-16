@@ -6,7 +6,6 @@ mod cli;
 mod command;
 mod http;
 mod ldap;
-mod proxy;
 mod tui;
 
 use self::cli::{Cli, Command, HttpCommand, LdapCommand};

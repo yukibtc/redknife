@@ -9,8 +9,8 @@ use tokio::sync::mpsc::Permit;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{HttpInterceptPendingRequest, HttpInterceptReply};
+use crate::http::proxy::{HttpProxyServerRequestHandler, ProxyBody};
 use crate::http::request::normalize_body_headers;
-use crate::proxy::http_forward_server::{HttpForwardProxyServerRequestHandler, ProxyBody};
 
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
@@ -28,7 +28,7 @@ impl HttpInterceptHandler {
     }
 }
 
-impl HttpForwardProxyServerRequestHandler for HttpInterceptHandler {
+impl HttpProxyServerRequestHandler for HttpInterceptHandler {
     fn handle<'a>(
         &'a self,
         original_uri: Uri,
@@ -98,9 +98,7 @@ mod tests {
     use tokio::time::timeout;
 
     use super::*;
-    use crate::proxy::http_forward_server::{
-        HttpForwardProxyServer, HttpForwardProxyServerRequestHandler, ProxyBody,
-    };
+    use crate::http::proxy::{HttpProxyServer, HttpProxyServerRequestHandler, ProxyBody};
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -178,7 +176,7 @@ mod tests {
             let address = listener.local_addr().expect("proxy address");
             let (pending_sender, pending_requests) = mpsc::channel(1);
             let handler = Arc::new(HttpInterceptHandler::new(pending_sender));
-            let proxy_task = tokio::spawn(HttpForwardProxyServer::new(listener, handler).run());
+            let proxy_task = tokio::spawn(HttpProxyServer::new(listener, handler).run());
 
             Self {
                 original_url,

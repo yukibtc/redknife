@@ -35,7 +35,7 @@ enum InnerError {
     ExpectedOriginForm,
 }
 
-pub trait HttpForwardProxyServerRequestHandler: Send + Sync {
+pub trait HttpProxyServerRequestHandler: Send + Sync {
     /// Receive an origin-form request without hop-by-hop headers.
     /// The original URI is separate metadata; its upstream destination stays fixed.
     /// Return the request to forward, or `None` to drop it.
@@ -46,17 +46,14 @@ pub trait HttpForwardProxyServerRequestHandler: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Option<Request<ProxyBody>>> + Send + 'a>>;
 }
 
-pub struct HttpForwardProxyServer {
+pub struct HttpProxyServer {
     listener: TcpListener,
-    handler: Arc<dyn HttpForwardProxyServerRequestHandler>,
+    handler: Arc<dyn HttpProxyServerRequestHandler>,
 }
 
-impl HttpForwardProxyServer {
+impl HttpProxyServer {
     #[inline]
-    pub fn new(
-        listener: TcpListener,
-        handler: Arc<dyn HttpForwardProxyServerRequestHandler>,
-    ) -> Self {
+    pub fn new(listener: TcpListener, handler: Arc<dyn HttpProxyServerRequestHandler>) -> Self {
         Self { listener, handler }
     }
 
@@ -64,12 +61,11 @@ impl HttpForwardProxyServer {
         loop {
             let (stream, _) = self.listener.accept().await?;
             let io: TokioIo<TcpStream> = TokioIo::new(stream);
-            let handler: Arc<dyn HttpForwardProxyServerRequestHandler> = Arc::clone(&self.handler);
+            let handler: Arc<dyn HttpProxyServerRequestHandler> = Arc::clone(&self.handler);
 
             task::spawn(async move {
                 let service = service_fn(move |req| {
-                    let handler: Arc<dyn HttpForwardProxyServerRequestHandler> =
-                        Arc::clone(&handler);
+                    let handler: Arc<dyn HttpProxyServerRequestHandler> = Arc::clone(&handler);
                     async move { forward(req, handler.clone()).await }
                 });
 
@@ -87,7 +83,7 @@ impl HttpForwardProxyServer {
 // Inspired by https://github.com/hyperium/hyper/blob/ea5b49b7d4e18c1eaa7f42db0ff91d1dcca56a04/examples/http_proxy.rs
 async fn forward(
     req: Request<Incoming>,
-    handler: Arc<dyn HttpForwardProxyServerRequestHandler>,
+    handler: Arc<dyn HttpProxyServerRequestHandler>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, InnerError> {
     if req.method() == Method::CONNECT {
         return Ok(text_response(
@@ -219,7 +215,7 @@ mod tests {
         drop: bool,
     }
 
-    impl HttpForwardProxyServerRequestHandler for FixedAction {
+    impl HttpProxyServerRequestHandler for FixedAction {
         fn handle<'a>(
             &'a self,
             _original_uri: Uri,
@@ -233,7 +229,7 @@ mod tests {
         target: Uri,
     }
 
-    impl HttpForwardProxyServerRequestHandler for EditTarget {
+    impl HttpProxyServerRequestHandler for EditTarget {
         fn handle<'a>(
             &'a self,
             _original_uri: Uri,
@@ -293,7 +289,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy_addr = listener.local_addr().unwrap();
 
-        let server = HttpForwardProxyServer::new(listener, Arc::new(FixedAction { drop: false }));
+        let server = HttpProxyServer::new(listener, Arc::new(FixedAction { drop: false }));
         let proxy_task = task::spawn(server.run());
 
         let response = send_request(
@@ -318,7 +314,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy_addr = listener.local_addr().unwrap();
 
-        let server = HttpForwardProxyServer::new(listener, Arc::new(FixedAction { drop: true }));
+        let server = HttpProxyServer::new(listener, Arc::new(FixedAction { drop: true }));
         let proxy_task = task::spawn(server.run());
 
         let response = send_request(proxy_addr, format!("http://{upstream_addr}/")).await;
@@ -348,7 +344,7 @@ mod tests {
         ] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let proxy_addr = listener.local_addr().unwrap();
-            let server = HttpForwardProxyServer::new(
+            let server = HttpProxyServer::new(
                 listener,
                 Arc::new(EditTarget {
                     target: target.parse().unwrap(),

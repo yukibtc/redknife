@@ -9,7 +9,7 @@ use tokio::signal;
 use tokio::sync::mpsc;
 
 use crate::http::intercept::HttpInterceptHandler;
-use crate::proxy::http_forward_server::HttpForwardProxyServer;
+use crate::http::proxy::HttpProxyServer;
 use crate::tui::http::editor::{self, ExitLabel};
 use crate::tui::http::intercept::{Action, HttpInterceptTuiSession};
 use crate::tui::terminal::TerminalSession;
@@ -23,7 +23,7 @@ pub async fn run(ip: IpAddr, port: u16, out_dir: Option<PathBuf>) -> io::Result<
     let (sender, receiver) = mpsc::channel(4096);
 
     let handler: Arc<HttpInterceptHandler> = Arc::new(HttpInterceptHandler::new(sender));
-    let proxy: HttpForwardProxyServer = HttpForwardProxyServer::new(listener, handler);
+    let proxy: HttpProxyServer = HttpProxyServer::new(listener, handler);
 
     // Keep one terminal session while switching between the interceptor and editor.
     let mut terminal: TerminalSession = TerminalSession::new()?;
