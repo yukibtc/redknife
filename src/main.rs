@@ -19,12 +19,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             HttpCommand::Proxy { ip, port, out_dir } => {
                 command::http::proxy::run(ip, port, out_dir).await?
             }
-            HttpCommand::Repeat {
+            HttpCommand::Send {
                 target,
                 file,
                 interactive,
                 output,
-            } => command::http::repeat::run(target, file, interactive, output).await?,
+            } => command::http::send::run(target, file, interactive, output).await?,
         },
         Command::Ldap { command } => match command {
             LdapCommand::Serve { ip, port, raw } => {

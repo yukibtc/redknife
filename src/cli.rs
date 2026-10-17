@@ -58,9 +58,9 @@ pub enum HttpCommand {
         #[arg(long)]
         out_dir: Option<PathBuf>,
     },
-    /// Repeat a request, opening the HTTP editor when no file is given
+    /// Send a request
     #[command(arg_required_else_help = true)]
-    Repeat {
+    Send {
         /// Target URL
         target: HttpTarget,
         /// Path to a saved HTTP request to repeat

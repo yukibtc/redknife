@@ -29,6 +29,10 @@
 
 ## Unreleased
 
+### Breaking change
+
+- Rename `rk http repeat` to `rk http send`
+
 ### Fixed
 
 - Add horizontal scrolling to HTTP proxy previews, request lists, and hex views
