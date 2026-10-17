@@ -1,28 +1,23 @@
 use std::io;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use http::header::CONNECTION;
 use http::uri::InvalidUri;
 use http::{HeaderMap, HeaderName, Method, Request, Response, StatusCode, Uri};
-use http_body_util::{BodyExt, Empty, Full};
+use http_body_util::{BodyExt, Empty, Full, Limited};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
 use tokio::task;
 
-mod handler;
-mod queue;
-mod state;
-
-use self::handler::ProxyHandler;
-pub(crate) use self::queue::PendingRequest;
 use super::body::{HttpBody, HttpBodyError};
-use super::compression::{UnpackError, unpack_response};
-use crate::http::proxy::handler::{ProxyHandleDropReason, ProxyHandleOutcome};
-use crate::http::request::HttpWireRequestError;
+use super::compression::{UnpackError, unpack_request, unpack_response};
+use super::constant::MAX_BODY_SIZE;
+use super::request::{HttpWireRequestError, normalize_body_headers};
 
 type ClientBuilder = hyper::client::conn::http1::Builder;
 type ServerBuilder = hyper::server::conn::http1::Builder;
@@ -45,35 +40,43 @@ enum HttpProxyError {
     LimitedCollector(Box<dyn std::error::Error + Send + Sync>),
     #[error("missing host")]
     MissingHost,
-    #[error("request dropped: {reason:?}")]
-    RequestDropped { reason: ProxyHandleDropReason },
     #[error("expected an origin-form request target")]
     ExpectedOriginForm,
 }
 
+pub enum HttpProxyServerHandlerDecision {
+    Forward(Box<Request<Bytes>>),
+    //Drop,
+}
+
+pub trait HttpProxyServerHandler: Send + Sync {
+    fn handle(
+        &self,
+        uri: Uri,
+        req: Request<Bytes>,
+    ) -> Pin<Box<dyn Future<Output = io::Result<HttpProxyServerHandlerDecision>> + Send + '_>>;
+}
+
 pub struct HttpProxyServer {
     listener: TcpListener,
-    handler: ProxyHandler,
+    handler: Arc<dyn HttpProxyServerHandler>,
 }
 
 impl HttpProxyServer {
     #[inline]
-    pub fn new(listener: TcpListener, sender: mpsc::Sender<PendingRequest>) -> Self {
-        Self {
-            listener,
-            handler: ProxyHandler::new(sender),
-        }
+    pub fn new(listener: TcpListener, handler: Arc<dyn HttpProxyServerHandler>) -> Self {
+        Self { listener, handler }
     }
 
     pub async fn run(self) -> io::Result<()> {
         loop {
             let (stream, _) = self.listener.accept().await?;
             let io: TokioIo<TcpStream> = TokioIo::new(stream);
-            let handler: ProxyHandler = self.handler.clone();
+            let handler: Arc<dyn HttpProxyServerHandler> = self.handler.clone();
 
             task::spawn(async move {
                 let service = service_fn(move |req| {
-                    let handler: ProxyHandler = handler.clone();
+                    let handler: Arc<dyn HttpProxyServerHandler> = handler.clone();
                     async move { forward(req, handler).await }
                 });
 
@@ -91,7 +94,7 @@ impl HttpProxyServer {
 // Inspired by https://github.com/hyperium/hyper/blob/ea5b49b7d4e18c1eaa7f42db0ff91d1dcca56a04/examples/http_proxy.rs
 async fn forward(
     req: Request<Incoming>,
-    handler: ProxyHandler,
+    handler: Arc<dyn HttpProxyServerHandler>,
 ) -> Result<Response<HttpBody>, HttpProxyError> {
     if req.method() == Method::CONNECT {
         return Ok(text_response(
@@ -114,13 +117,31 @@ async fn forward(
         .ok_or(HttpProxyError::MissingHost)?;
     let port: u16 = original_uri.port_u16().unwrap_or(80);
 
-    let mut req: Request<HttpBody> = req.map(|body| body.map_err(Into::into).boxed());
+    // Collect the body into Bytes, with a maximum size of MAX_BODY_SIZE
+    let (parts, body) = req.into_parts();
+    let bytes: Bytes = Limited::new(body, MAX_BODY_SIZE)
+        .collect()
+        .await
+        .map_err(HttpProxyError::LimitedCollector)?
+        .to_bytes();
+    let mut req: Request<Bytes> = Request::from_parts(parts, bytes);
 
     prepare_origin_request(&mut req)?;
 
-    let mut req: Request<HttpBody> = match handler.handle(original_uri, req).await? {
-        ProxyHandleOutcome::Process(req) => *req,
-        ProxyHandleOutcome::Drop(reason) => return Err(HttpProxyError::RequestDropped { reason }),
+    // Unpack the compressed request
+    unpack_request(&mut req).await?;
+
+    // And normalize the body headers
+    normalize_body_headers(&mut req);
+
+    let mut req: Request<Bytes> = match handler.handle(original_uri, req).await? {
+        HttpProxyServerHandlerDecision::Forward(req) => *req,
+        // HttpProxyServerHandlerDecision::Drop => {
+        //     return Ok(text_response(
+        //         StatusCode::FORBIDDEN,
+        //         "Request blocked by redknife",
+        //     ));
+        // }
     };
 
     if req.uri().scheme().is_some() || req.uri().authority().is_some() {
@@ -128,6 +149,10 @@ async fn forward(
     }
 
     remove_hop_by_hop(req.headers_mut());
+    normalize_body_headers(&mut req);
+
+    let req: Request<HttpBody> =
+        req.map(|body| Full::new(body).map_err(|never| match never {}).boxed());
 
     let stream: TcpStream = TcpStream::connect((host.as_str(), port)).await?;
     let io: TokioIo<TcpStream> = TokioIo::new(stream);
@@ -162,6 +187,7 @@ fn prepare_origin_request<B>(req: &mut Request<B>) -> Result<(), InvalidUri> {
     }
 
     remove_hop_by_hop(req.headers_mut());
+
     Ok(())
 }
 

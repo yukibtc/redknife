@@ -1,6 +1,7 @@
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::{DateTime, Local};
@@ -12,9 +13,11 @@ use tokio::signal;
 use tokio::sync::mpsc;
 
 pub(super) mod dump;
+mod middleware;
 
 use self::dump::HttpProxyDumpFormat;
-use crate::http::proxy::{HttpProxyServer, PendingRequest};
+use self::middleware::{HttpProxyServerMiddleware, MiddlewareRequest};
+use crate::http::proxy::{HttpProxyServer, HttpProxyServerHandler};
 
 pub(in crate::cli) async fn run(
     ip: IpAddr,
@@ -36,10 +39,13 @@ pub(in crate::cli) async fn run(
     stderr.write_all(b"\nCtrl+C to stop.\n\n").await?;
     stderr.flush().await?;
 
-    let (sender, receiver) = mpsc::channel(4096);
+    let (sender, receiver) = mpsc::unbounded_channel();
+
+    let middleware: HttpProxyServerMiddleware = HttpProxyServerMiddleware::new(sender);
 
     // Create the HTTP proxy server
-    let proxy: HttpProxyServer = HttpProxyServer::new(listener, sender);
+    let handler: Arc<dyn HttpProxyServerHandler> = Arc::new(middleware);
+    let proxy: HttpProxyServer = HttpProxyServer::new(listener, handler);
 
     tokio::select! {
         result = proxy.run() => result?,
@@ -72,21 +78,21 @@ impl fmt::Display for Output {
     }
 }
 
-impl From<PendingRequest> for Output {
-    fn from(request: PendingRequest) -> Self {
+impl From<MiddlewareRequest> for Output {
+    fn from(request: MiddlewareRequest) -> Self {
         Self {
             id: request.id,
             timestamp: request.timestamp,
-            req: request.original,
+            req: request.req,
             raw: request.raw,
-            uri: request.original_uri,
+            uri: request.uri,
         }
     }
 }
 
 async fn writer(
     stdout: &mut Stdout,
-    mut rx: mpsc::Receiver<PendingRequest>,
+    mut rx: mpsc::UnboundedReceiver<MiddlewareRequest>,
     dump: Option<PathBuf>,
     dump_format: HttpProxyDumpFormat,
 ) -> io::Result<()> {

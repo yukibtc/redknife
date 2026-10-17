@@ -1,4 +1,4 @@
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use http::header::{CONTENT_LENGTH, TRAILER, TRANSFER_ENCODING};
 use http::request::Builder;
 use http::{Request, Version};
@@ -18,14 +18,16 @@ pub enum HttpWireRequestError {
 }
 
 /// Serialize the complete request, keeping arbitrary header and body bytes intact.
-pub fn format_request(req: &Request<Bytes>) -> Result<Vec<u8>, HttpWireRequestError> {
+pub fn format_request(req: &Request<Bytes>) -> Result<Bytes, HttpWireRequestError> {
     let version = match req.version() {
         Version::HTTP_10 => "HTTP/1.0",
         Version::HTTP_11 => "HTTP/1.1",
         _ => return Err(HttpWireRequestError::UnsupportedVersion),
     };
 
-    let mut output: Vec<u8> = format!("{} {} {version}\r\n", req.method(), req.uri()).into_bytes();
+    let mut output: BytesMut = BytesMut::new();
+
+    output.extend_from_slice(format!("{} {} {version}\r\n", req.method(), req.uri()).as_bytes());
 
     for (name, value) in req.headers() {
         output.extend_from_slice(name.as_str().as_bytes());
@@ -37,7 +39,7 @@ pub fn format_request(req: &Request<Bytes>) -> Result<Vec<u8>, HttpWireRequestEr
     output.extend_from_slice(b"\r\n");
     output.extend_from_slice(req.body());
 
-    Ok(output)
+    Ok(output.freeze())
 }
 
 /// The editor contains a decoded body, not HTTP transfer framing.
