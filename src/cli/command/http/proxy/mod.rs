@@ -6,7 +6,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Local};
 use http::{Request, Uri};
 use tokio::fs::File;
-use tokio::io::{self, AsyncWriteExt, Stdout};
+use tokio::io::{self, AsyncWriteExt, Stderr, Stdout};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::mpsc;
@@ -26,9 +26,15 @@ pub(in crate::cli) async fn run(
 
     let listener: TcpListener = TcpListener::bind(addr).await?;
 
-    // TODO: write these to stderr
-    println!("HTTP proxy listening on {}", listener.local_addr()?);
-    println!("Ctrl+C to stop.\n");
+    let mut stdout: Stdout = io::stdout();
+    let mut stderr: Stderr = io::stderr();
+
+    stderr.write_all(b"HTTP proxy listening on ").await?;
+    stderr
+        .write_all(listener.local_addr()?.to_string().as_bytes())
+        .await?;
+    stderr.write_all(b"\nCtrl+C to stop.\n\n").await?;
+    stderr.flush().await?;
 
     let (sender, receiver) = mpsc::channel(4096);
 
@@ -37,7 +43,7 @@ pub(in crate::cli) async fn run(
 
     tokio::select! {
         result = proxy.run() => result?,
-        result = writer(receiver, dump, dump_format) => result?,
+        result = writer(&mut stdout, receiver, dump, dump_format) => result?,
         result = signal::ctrl_c() => result?,
     }
 
@@ -79,11 +85,11 @@ impl From<PendingRequest> for Output {
 }
 
 async fn writer(
+    stdout: &mut Stdout,
     mut rx: mpsc::Receiver<PendingRequest>,
     dump: Option<PathBuf>,
     dump_format: HttpProxyDumpFormat,
 ) -> io::Result<()> {
-    let mut stdout: Stdout = io::stdout();
     let mut file: Option<File> = match dump {
         Some(path) => Some(
             File::options()
