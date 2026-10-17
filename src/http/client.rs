@@ -139,8 +139,13 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let (mut sender, connection) =
-        hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;
+    let io: TokioIo<S> = TokioIo::new(stream);
+
+    let (mut sender, connection) = hyper::client::conn::http1::Builder::new()
+        .preserve_header_case(true)
+        .title_case_headers(true)
+        .handshake(io)
+        .await?;
 
     let send = async {
         let is_head: bool = request.method() == Method::HEAD;
