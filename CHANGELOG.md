@@ -34,6 +34,10 @@
 - Rename `rk http repeat` to `rk http send`
 - Drop TUIs and rework `rk http proxy` and `rk http send` commands
 
+### Added
+
+- Add HTTP proxy request dumps
+
 ## 0.3.0 - 2026/10/16
 
 ### Breaking change

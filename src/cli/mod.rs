@@ -19,9 +19,12 @@ impl Cli {
                 HttpCommand::Callback { ip, port } => {
                     command::http::callback::run(ip, port).await?
                 }
-                HttpCommand::Proxy { ip, port, dump } => {
-                    command::http::proxy::run(ip, port, dump).await?
-                }
+                HttpCommand::Proxy {
+                    ip,
+                    port,
+                    dump,
+                    dump_format,
+                } => command::http::proxy::run(ip, port, dump, dump_format).await?,
                 HttpCommand::Send {
                     target,
                     file,

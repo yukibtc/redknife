@@ -3,11 +3,12 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 
-use crate::http::target::HttpTarget;
-
 pub mod callback;
 pub mod proxy;
 pub mod send;
+
+use self::proxy::dump::HttpProxyDumpFormat;
+use crate::http::target::HttpTarget;
 
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum HttpCommand {
@@ -37,10 +38,12 @@ pub(in crate::cli) enum HttpCommand {
         port: u16,
         // TODO: add --interceptor, which enables a simple interactive CLI, allowing to drop, forward or modify a request.
         // TODO: add --rules <FILE> to load rules from a TOML file
-        // TODO: add --format <format> to write to stdout a specified format (i.e., jsonl)
-        /// Dump requests to this file
+        /// Dump requests to file
         #[arg(long)]
         dump: Option<PathBuf>,
+        /// The format to use when dumping requests
+        #[arg(long, default_value_t = HttpProxyDumpFormat::Text)]
+        dump_format: HttpProxyDumpFormat,
     },
     /// Send a request
     #[command(arg_required_else_help = true)]

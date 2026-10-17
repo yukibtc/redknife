@@ -11,13 +11,22 @@ use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::mpsc;
 
+pub(super) mod dump;
+
+use self::dump::HttpProxyDumpFormat;
 use crate::http::proxy::{HttpProxyServer, PendingRequest};
 
-pub async fn run(ip: IpAddr, port: u16, dump: Option<PathBuf>) -> io::Result<()> {
+pub(in crate::cli) async fn run(
+    ip: IpAddr,
+    port: u16,
+    dump: Option<PathBuf>,
+    dump_format: HttpProxyDumpFormat,
+) -> io::Result<()> {
     let addr: SocketAddr = SocketAddr::new(ip, port);
 
     let listener: TcpListener = TcpListener::bind(addr).await?;
 
+    // TODO: write these to stderr
     println!("HTTP proxy listening on {}", listener.local_addr()?);
     println!("Ctrl+C to stop.\n");
 
@@ -28,7 +37,7 @@ pub async fn run(ip: IpAddr, port: u16, dump: Option<PathBuf>) -> io::Result<()>
 
     tokio::select! {
         result = proxy.run() => result?,
-        result = writer(receiver, dump) => result?,
+        result = writer(receiver, dump, dump_format) => result?,
         result = signal::ctrl_c() => result?,
     }
 
@@ -69,7 +78,11 @@ impl From<PendingRequest> for Output {
     }
 }
 
-async fn writer(mut rx: mpsc::Receiver<PendingRequest>, dump: Option<PathBuf>) -> io::Result<()> {
+async fn writer(
+    mut rx: mpsc::Receiver<PendingRequest>,
+    dump: Option<PathBuf>,
+    dump_format: HttpProxyDumpFormat,
+) -> io::Result<()> {
     let mut stdout: Stdout = io::stdout();
     let mut file: Option<File> = match dump {
         Some(path) => Some(
@@ -85,10 +98,8 @@ async fn writer(mut rx: mpsc::Receiver<PendingRequest>, dump: Option<PathBuf>) -
 
     while let Some(request) = rx.recv().await {
         // Dump to file
-        // TODO: dump as JSONL
         if let Some(file) = file.as_mut() {
-            file.write_all(request.raw.as_ref()).await?;
-            file.write_u8(b'\n').await?;
+            dump_format.write(&request, file).await?;
             file.flush().await?;
         }
 
