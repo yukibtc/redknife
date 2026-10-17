@@ -1,35 +1,16 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::Subcommand;
 
 use crate::http::target::HttpTarget;
 
-#[derive(Debug, Parser)]
-#[command(version, about, long_about = None)]
-pub struct Cli {
-    #[command(subcommand)]
-    pub command: Command,
-}
+pub mod callback;
+pub mod proxy;
+pub mod send;
 
 #[derive(Debug, Subcommand)]
-pub enum Command {
-    /// HTTP utilities
-    #[command(arg_required_else_help = true)]
-    Http {
-        #[command(subcommand)]
-        command: HttpCommand,
-    },
-    /// LDAP utilities
-    #[command(arg_required_else_help = true)]
-    Ldap {
-        #[command(subcommand)]
-        command: LdapCommand,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-pub enum HttpCommand {
+pub(in crate::cli) enum HttpCommand {
     /// Start an HTTP listener that logs incoming requests
     Callback {
         /// Local IP address to listen on
@@ -75,21 +56,5 @@ pub enum HttpCommand {
         //#[arg(short, long, requires = "file", conflicts_with = "interactive")]
         #[arg(short, long)]
         output: Option<PathBuf>,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-pub enum LdapCommand {
-    /// Starts a minimal LDAP server.
-    Serve {
-        /// Local IP address to listen on
-        #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))]
-        ip: IpAddr,
-        /// Local TCP port to listen on
-        #[arg(long, default_value_t = 389)]
-        port: u16,
-        /// Show complete incoming BER messages in addition to decoded fields
-        #[arg(long)]
-        raw: bool,
     },
 }
