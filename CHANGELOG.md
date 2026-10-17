@@ -32,10 +32,7 @@
 ### Breaking change
 
 - Rename `rk http repeat` to `rk http send`
-
-### Fixed
-
-- Add horizontal scrolling to HTTP proxy previews, request lists, and hex views
+- Drop TUIs and rework `rk http proxy` and `rk http send` commands
 
 ## 0.3.0 - 2026/10/16
 

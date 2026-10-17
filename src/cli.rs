@@ -54,9 +54,12 @@ pub enum HttpCommand {
         /// Local port to listen on
         #[arg(long, default_value_t = 8001)]
         port: u16,
-        /// Directory for manually saved HTTP requests (defaults to the current directory).
+        // TODO: add --interceptor, which enables a simple interactive CLI, allowing to drop, forward or modify a request.
+        // TODO: add --rules <FILE> to load rules from a TOML file
+        // TODO: add --format <format> to write to stdout a specified format (i.e., jsonl)
+        /// Dump requests to this file
         #[arg(long)]
-        out_dir: Option<PathBuf>,
+        dump: Option<PathBuf>,
     },
     /// Send a request
     #[command(arg_required_else_help = true)]
@@ -64,12 +67,13 @@ pub enum HttpCommand {
         /// Target URL
         target: HttpTarget,
         /// Path to a saved HTTP request to repeat
-        file: Option<PathBuf>,
-        /// Open the request file in the interactive HTTP editor
-        #[arg(short, long)]
-        interactive: bool,
+        file: PathBuf,
+        // /// Open the request file in the interactive HTTP editor
+        // #[arg(short, long)]
+        // interactive: bool,
         /// Save normalized response headers and unpacked body to this path instead of stdout
-        #[arg(short, long, requires = "file", conflicts_with = "interactive")]
+        //#[arg(short, long, requires = "file", conflicts_with = "interactive")]
+        #[arg(short, long)]
         output: Option<PathBuf>,
     },
 }

@@ -6,7 +6,6 @@ mod cli;
 mod command;
 mod http;
 mod ldap;
-mod tui;
 
 use self::cli::{Cli, Command, HttpCommand, LdapCommand};
 
@@ -16,15 +15,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         Command::Http { command } => match command {
             HttpCommand::Callback { ip, port } => command::http::callback::run(ip, port).await?,
-            HttpCommand::Proxy { ip, port, out_dir } => {
-                command::http::proxy::run(ip, port, out_dir).await?
+            HttpCommand::Proxy { ip, port, dump } => {
+                command::http::proxy::run(ip, port, dump).await?
             }
             HttpCommand::Send {
                 target,
                 file,
-                interactive,
                 output,
-            } => command::http::send::run(target, file, interactive, output).await?,
+            } => command::http::send::run(target, file, output).await?,
         },
         Command::Ldap { command } => match command {
             LdapCommand::Serve { ip, port, raw } => {
