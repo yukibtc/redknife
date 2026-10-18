@@ -28,6 +28,7 @@ http-body-util = "0.1.5"
 httparse = "1.10.1"
 hyper = { version = "1.12.0", default-features = false, features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
+notify = "8.2.0"
 rustls-native-certs = "0.8"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
@@ -35,3 +36,6 @@ tokio = { version = "1.53.2", default-features = false, features = ["fs", "io-st
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { version = "0.7.20", default-features = false, features = ["codec", "io"] }
 toml = "1.1.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"

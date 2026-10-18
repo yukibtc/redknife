@@ -42,6 +42,9 @@ pub(in crate::cli) enum HttpCommand {
         /// Select rules to filter and modify HTTP traffic
         #[arg(long)]
         rules: Option<PathBuf>,
+        /// Watch rules file for changes and automatically reload
+        #[arg(long, requires = "rules")]
+        watch_rules: bool,
         /// Dump requests to file
         #[arg(long)]
         dump: Option<PathBuf>,

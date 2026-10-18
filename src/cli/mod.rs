@@ -24,6 +24,7 @@ impl Cli {
                     ip,
                     port,
                     rules,
+                    watch_rules,
                     dump,
                     dump_format,
                 } => match command {
@@ -32,7 +33,10 @@ impl Cli {
                             command::http::proxy::rules_example().await?
                         }
                     },
-                    None => command::http::proxy::run(ip, port, rules, dump, dump_format).await?,
+                    None => {
+                        command::http::proxy::run(ip, port, rules, watch_rules, dump, dump_format)
+                            .await?
+                    }
                 },
                 HttpCommand::Send {
                     target,

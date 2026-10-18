@@ -3,7 +3,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::fs::{self, File};
+use tokio::fs::File;
 use tokio::io::{self, AsyncWriteExt, Stderr, Stdout};
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -15,7 +15,8 @@ mod rules;
 
 use self::dump::HttpProxyDumpFormat;
 use self::middleware::{HttpProxyServerMiddleware, MiddlewareEvent};
-use self::rules::{RuleOutcome, Rules};
+use self::rules::RuleOutcome;
+use self::rules::loader::RulesLoader;
 use crate::http::proxy::{HttpProxyServer, HttpProxyServerHandler};
 
 pub(in crate::cli) async fn rules_example() -> io::Result<()> {
@@ -28,19 +29,13 @@ pub(in crate::cli) async fn run(
     ip: IpAddr,
     port: u16,
     rules: Option<PathBuf>,
+    watch_rules: bool,
     dump: Option<PathBuf>,
     dump_format: HttpProxyDumpFormat,
 ) -> io::Result<()> {
     let addr: SocketAddr = SocketAddr::new(ip, port);
 
-    let rules: Rules = match rules {
-        Some(path) => {
-            let content: String = fs::read_to_string(path).await?;
-            toml::from_str(&content)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
-        }
-        None => Rules::default(),
-    };
+    let (mut reloader, rules) = RulesLoader::new(rules, watch_rules).await?;
 
     let listener: TcpListener = TcpListener::bind(addr).await?;
 
@@ -65,6 +60,7 @@ pub(in crate::cli) async fn run(
     tokio::select! {
         result = proxy.run() => result?,
         result = writer(&mut stdout, receiver, dump, dump_format) => result?,
+        result = reloader.run(&mut stderr) => result?,
         result = signal::ctrl_c() => result?,
     }
 
