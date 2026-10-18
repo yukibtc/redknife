@@ -29,7 +29,10 @@ pub(in crate::cli) enum HttpCommand {
     /// Configure your browser or HTTP client to use the proxy.
     ///
     /// HTTPS is not supported yet.
+    #[command(args_conflicts_with_subcommands = true)]
     Proxy {
+        #[command(subcommand)]
+        command: Option<HttpProxyCommand>,
         /// Local IP address to bind the proxy to
         #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))]
         ip: IpAddr,
@@ -61,4 +64,20 @@ pub(in crate::cli) enum HttpCommand {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub(in crate::cli) enum HttpProxyCommand {
+    /// Proxy rules utilities
+    #[command(arg_required_else_help = true)]
+    Rules {
+        #[command(subcommand)]
+        command: HttpProxyRulesCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(in crate::cli) enum HttpProxyRulesCommand {
+    /// Print an example proxy rules configuration to stdout
+    Example,
 }

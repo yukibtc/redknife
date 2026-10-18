@@ -12,6 +12,8 @@ use self::deser_util::{
     deserialize_optional_header_map, deserialize_optional_method, deserialize_status_code,
 };
 
+pub(super) const EXAMPLE: &str = include_str!("example.toml");
+
 #[derive(Clone, Copy)]
 pub(super) enum RuleOutcome {
     Continue,
@@ -243,8 +245,6 @@ impl RuleBody {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const EXAMPLE: &'static str = include_str!("example.toml");
 
     #[test]
     fn deserialize_example() {

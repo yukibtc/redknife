@@ -18,6 +18,12 @@ use self::middleware::{HttpProxyServerMiddleware, MiddlewareEvent};
 use self::rules::{RuleOutcome, Rules};
 use crate::http::proxy::{HttpProxyServer, HttpProxyServerHandler};
 
+pub(in crate::cli) async fn rules_example() -> io::Result<()> {
+    let mut stdout: Stdout = io::stdout();
+    stdout.write_all(rules::EXAMPLE.as_bytes()).await?;
+    stdout.flush().await
+}
+
 pub(in crate::cli) async fn run(
     ip: IpAddr,
     port: u16,

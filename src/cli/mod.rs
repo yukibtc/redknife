@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 mod command;
 
-use self::command::http::HttpCommand;
+use self::command::http::{HttpCommand, HttpProxyCommand, HttpProxyRulesCommand};
 use self::command::ldap::LdapCommand;
 
 #[derive(Debug, Parser)]
@@ -20,12 +20,20 @@ impl Cli {
                     command::http::callback::run(ip, port).await?
                 }
                 HttpCommand::Proxy {
+                    command,
                     ip,
                     port,
                     rules,
                     dump,
                     dump_format,
-                } => command::http::proxy::run(ip, port, rules, dump, dump_format).await?,
+                } => match command {
+                    Some(HttpProxyCommand::Rules { command }) => match command {
+                        HttpProxyRulesCommand::Example => {
+                            command::http::proxy::rules_example().await?
+                        }
+                    },
+                    None => command::http::proxy::run(ip, port, rules, dump, dump_format).await?,
+                },
                 HttpCommand::Send {
                     target,
                     file,
