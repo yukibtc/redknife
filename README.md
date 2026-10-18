@@ -8,6 +8,9 @@
 
 ## Features
 
+- **FTP**
+  - **FTP Server**: A minimal FTP server
+
 - **HTTP**
   - **HTTP Callback Server**: Receive and log incoming HTTP requests.
   - **HTTP Proxy**: Inspect, intercept, modify, and forward/drop HTTP requests.

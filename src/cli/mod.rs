@@ -1,13 +1,21 @@
 use clap::{Parser, Subcommand};
 
+mod ftp;
 mod http;
 mod ldap;
 
+use self::ftp::FtpCommand;
 use self::http::HttpCommand;
 use self::ldap::LdapCommand;
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// FTP utilities
+    #[command(arg_required_else_help = true)]
+    Ftp {
+        #[command(subcommand)]
+        command: FtpCommand,
+    },
     /// HTTP utilities
     #[command(arg_required_else_help = true)]
     Http {
@@ -32,6 +40,7 @@ pub(super) struct Cli {
 impl Cli {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self.command {
+            Command::Ftp { command } => command.run().await?,
             Command::Http { command } => command.run().await?,
             Command::Ldap { command } => command.run().await?,
         }
