@@ -4,18 +4,20 @@ use std::{fmt, io};
 use clap::ValueEnum;
 use tokio::io::AsyncWrite;
 
+mod hex;
 mod summary;
 mod text;
 
+use self::hex::HexOutput;
 use self::summary::SummaryOutput;
 use self::text::TextOutput;
 use super::middleware::MiddlewareEvent;
 
-// TODO: add hex and jsonl
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(in crate::cli) enum HttpProxyFormat {
     Summary,
     Text,
+    Hex,
 }
 
 impl fmt::Display for HttpProxyFormat {
@@ -23,6 +25,7 @@ impl fmt::Display for HttpProxyFormat {
         match self {
             Self::Summary => write!(f, "summary"),
             Self::Text => write!(f, "text"),
+            Self::Hex => write!(f, "hex"),
         }
     }
 }
@@ -34,6 +37,7 @@ impl FromStr for HttpProxyFormat {
         match s {
             "summary" => Ok(Self::Summary),
             "text" => Ok(Self::Text),
+            "hex" => Ok(Self::Hex),
             _ => Err("unsupported dump format"),
         }
     }
@@ -47,6 +51,7 @@ impl HttpProxyFormat {
         match self {
             Self::Summary => SummaryOutput::from(request).write_all(out).await,
             Self::Text => TextOutput::from(request).write_all(out).await,
+            Self::Hex => HexOutput::from(request).write_all(out).await,
         }
     }
 }

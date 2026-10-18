@@ -1,5 +1,6 @@
 use std::{fmt, str};
 
+use crate::hexdump::HexDump;
 use crate::ldap::event::{BindEvent, DisconnectReason, LoginPhase, OperationKind};
 use crate::ldap::{
     BindAuthentication, LdapEvent, LdapEventKind, PlainCredentials, SaslMechanism,
@@ -196,56 +197,6 @@ fn format_bind(formatter: &mut fmt::Formatter<'_>, bind: &BindEvent) -> fmt::Res
 fn format_unsupported_payload(formatter: &mut fmt::Formatter<'_>, payload: &[u8]) -> fmt::Result {
     writeln!(formatter, " payload_length={}", payload.len())?;
     write!(formatter, "{}", HexDump::new(payload))
-}
-
-/// xxd-style rows preserve every octet; the ASCII column cannot execute
-/// terminal controls or interpret invalid UTF-8 from a received payload.
-struct HexDump<'a> {
-    bytes: &'a [u8],
-}
-
-impl<'a> HexDump<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes }
-    }
-}
-
-impl fmt::Display for HexDump<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.bytes.is_empty() {
-            return writeln!(formatter, "    <empty>");
-        }
-
-        for (row_index, row) in self.bytes.chunks(16).enumerate() {
-            let offset: usize = row_index * 16;
-            write!(formatter, "    {offset:08x}: ")?;
-
-            for group_index in 0..8 {
-                for column in 0..2 {
-                    match row.get(group_index * 2 + column) {
-                        Some(byte) => write!(formatter, "{byte:02x}")?,
-                        None => formatter.write_str("  ")?,
-                    }
-                }
-                formatter.write_str(" ")?;
-            }
-
-            formatter.write_str(" ")?;
-
-            for byte in row {
-                let character: char = if (0x20..=0x7e).contains(byte) {
-                    char::from(*byte)
-                } else {
-                    '.'
-                };
-                write!(formatter, "{character}")?;
-            }
-
-            writeln!(formatter)?;
-        }
-
-        Ok(())
-    }
 }
 
 /// Quote received text without allowing terminal control sequences to execute.

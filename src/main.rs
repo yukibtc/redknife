@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 mod cli;
+mod hexdump;
 mod http;
 mod ldap;
 
