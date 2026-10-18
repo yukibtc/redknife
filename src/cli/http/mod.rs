@@ -7,7 +7,7 @@ pub mod callback;
 pub mod proxy;
 pub mod send;
 
-use self::proxy::dump::HttpProxyDumpFormat;
+use self::proxy::HttpProxyFormat;
 use crate::http::target::HttpTarget;
 
 #[derive(Debug, Subcommand)]
@@ -61,12 +61,15 @@ pub(in crate::cli) enum HttpCommand {
         /// Watch rules file for changes and automatically reload
         #[arg(long, requires = "rules")]
         watch_rules: bool,
+        /// The format to use when printing requests to stdout.
+        #[arg(long, default_value_t = HttpProxyFormat::Summary)]
+        stdout_format: HttpProxyFormat,
         /// Dump requests to file
         #[arg(long)]
         dump: Option<PathBuf>,
         /// The format to use when dumping requests
-        #[arg(long, default_value_t = HttpProxyDumpFormat::Text)]
-        dump_format: HttpProxyDumpFormat,
+        #[arg(long, default_value_t = HttpProxyFormat::Text)]
+        dump_format: HttpProxyFormat,
     },
     /// Send a request
     #[command(arg_required_else_help = true)]
@@ -95,13 +98,25 @@ impl HttpCommand {
                 port,
                 rules,
                 watch_rules,
+                stdout_format,
                 dump,
                 dump_format,
             } => match command {
                 Some(HttpProxyCommand::Rules { command }) => match command {
                     HttpProxyRulesCommand::Example => proxy::rules_example().await?,
                 },
-                None => proxy::run(ip, port, rules, watch_rules, dump, dump_format).await?,
+                None => {
+                    proxy::run(
+                        ip,
+                        port,
+                        rules,
+                        watch_rules,
+                        stdout_format,
+                        dump,
+                        dump_format,
+                    )
+                    .await?
+                }
             },
             Self::Send {
                 target,

@@ -5,17 +5,17 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 use super::super::middleware::MiddlewareEvent;
 use super::super::rules::RuleOutcome;
 
-pub(super) struct TextDumpOutput<'a> {
+pub(super) struct TextOutput<'a> {
     event: &'a MiddlewareEvent,
 }
 
-impl<'a> From<&'a MiddlewareEvent> for TextDumpOutput<'a> {
+impl<'a> From<&'a MiddlewareEvent> for TextOutput<'a> {
     fn from(request: &'a MiddlewareEvent) -> Self {
         Self { event: request }
     }
 }
 
-impl TextDumpOutput<'_> {
+impl TextOutput<'_> {
     fn bytes(&self) -> Vec<u8> {
         let event: &MiddlewareEvent = self.event;
 

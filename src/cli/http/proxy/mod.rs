@@ -1,4 +1,3 @@
-use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,13 +8,12 @@ use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::mpsc;
 
-pub(super) mod dump;
+mod format;
 mod middleware;
 mod rules;
 
-use self::dump::HttpProxyDumpFormat;
+pub(super) use self::format::HttpProxyFormat;
 use self::middleware::{HttpProxyServerMiddleware, MiddlewareEvent};
-use self::rules::RuleOutcome;
 use self::rules::loader::RulesLoader;
 use crate::http::proxy::{HttpProxyServer, HttpProxyServerHandler};
 
@@ -30,8 +28,9 @@ pub(super) async fn run(
     port: u16,
     rules: Option<PathBuf>,
     watch_rules: bool,
+    stdout_format: HttpProxyFormat,
     dump: Option<PathBuf>,
-    dump_format: HttpProxyDumpFormat,
+    dump_format: HttpProxyFormat,
 ) -> io::Result<()> {
     let addr: SocketAddr = SocketAddr::new(ip, port);
 
@@ -59,7 +58,7 @@ pub(super) async fn run(
 
     tokio::select! {
         result = proxy.run() => result?,
-        result = writer(&mut stdout, receiver, dump, dump_format) => result?,
+        result = writer(&mut stdout, receiver, stdout_format, dump, dump_format) => result?,
         result = reloader.run(&mut stderr) => result?,
         result = signal::ctrl_c() => result?,
     }
@@ -67,59 +66,12 @@ pub(super) async fn run(
     Ok(())
 }
 
-struct Output<'a> {
-    event: &'a MiddlewareEvent,
-}
-
-impl<'a> From<&'a MiddlewareEvent> for Output<'a> {
-    fn from(event: &'a MiddlewareEvent) -> Self {
-        Self { event }
-    }
-}
-
-impl fmt::Display for Output<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let event = self.event;
-
-        write!(
-            f,
-            "[{}] #{} {} {} ",
-            event.timestamp.format("%Y-%m-%d %H:%M:%S"),
-            event.id,
-            event.original.method(),
-            event.uri,
-        )?;
-
-        match event.report.outcome {
-            RuleOutcome::Continue => write!(f, "ALLOW")?,
-            RuleOutcome::Deny(code) => {
-                write!(f, "DENY {}", code.as_u16())?;
-            }
-        }
-
-        match &event.modified_raw {
-            Some(modified) => write!(
-                f,
-                " modified ({} -> {} bytes)",
-                event.original_raw.len(),
-                modified.len(),
-            ),
-            None => write!(f, " ({} bytes)", event.original_raw.len()),
-        }?;
-
-        if !event.report.matched_rules.is_empty() {
-            write!(f, " rules={:?}", event.report.matched_rules)?;
-        }
-
-        Ok(())
-    }
-}
-
 async fn writer(
     stdout: &mut Stdout,
     mut rx: mpsc::UnboundedReceiver<MiddlewareEvent>,
+    stdout_format: HttpProxyFormat,
     dump: Option<PathBuf>,
-    dump_format: HttpProxyDumpFormat,
+    dump_format: HttpProxyFormat,
 ) -> io::Result<()> {
     let mut file: Option<File> = match dump {
         Some(path) => Some(
@@ -141,10 +93,7 @@ async fn writer(
         }
 
         // Write to stdout
-        let output: Output = (&request).into();
-        let output: String = output.to_string();
-        stdout.write_all(output.as_bytes()).await?;
-        stdout.write_u8(b'\n').await?;
+        stdout_format.write(&request, stdout).await?;
         stdout.flush().await?;
     }
 
