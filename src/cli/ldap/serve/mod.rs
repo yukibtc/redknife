@@ -10,7 +10,7 @@ mod output;
 use self::output::EventOutput;
 use crate::ldap::{LdapEvent, LdapServer};
 
-pub(crate) async fn run(ip: IpAddr, port: u16, raw: bool) -> io::Result<()> {
+pub(super) async fn run(ip: IpAddr, port: u16, raw: bool) -> io::Result<()> {
     let bind: SocketAddr = SocketAddr::new(ip, port);
 
     let listener: TcpListener = TcpListener::bind(bind).await?;

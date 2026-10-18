@@ -11,6 +11,22 @@ use self::proxy::dump::HttpProxyDumpFormat;
 use crate::http::target::HttpTarget;
 
 #[derive(Debug, Subcommand)]
+pub(in crate::cli) enum HttpProxyRulesCommand {
+    /// Print an example proxy rules configuration to stdout
+    Example,
+}
+
+#[derive(Debug, Subcommand)]
+pub(in crate::cli) enum HttpProxyCommand {
+    /// Proxy rules utilities
+    #[command(arg_required_else_help = true)]
+    Rules {
+        #[command(subcommand)]
+        command: HttpProxyRulesCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub(in crate::cli) enum HttpCommand {
     /// Start an HTTP listener that logs incoming requests
     Callback {
@@ -69,18 +85,31 @@ pub(in crate::cli) enum HttpCommand {
     },
 }
 
-#[derive(Debug, Subcommand)]
-pub(in crate::cli) enum HttpProxyCommand {
-    /// Proxy rules utilities
-    #[command(arg_required_else_help = true)]
-    Rules {
-        #[command(subcommand)]
-        command: HttpProxyRulesCommand,
-    },
-}
+impl HttpCommand {
+    pub(in crate::cli) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Callback { ip, port } => callback::run(ip, port).await?,
+            Self::Proxy {
+                command,
+                ip,
+                port,
+                rules,
+                watch_rules,
+                dump,
+                dump_format,
+            } => match command {
+                Some(HttpProxyCommand::Rules { command }) => match command {
+                    HttpProxyRulesCommand::Example => proxy::rules_example().await?,
+                },
+                None => proxy::run(ip, port, rules, watch_rules, dump, dump_format).await?,
+            },
+            Self::Send {
+                target,
+                file,
+                output,
+            } => send::run(target, file, output).await?,
+        }
 
-#[derive(Debug, Subcommand)]
-pub(in crate::cli) enum HttpProxyRulesCommand {
-    /// Print an example proxy rules configuration to stdout
-    Example,
+        Ok(())
+    }
 }

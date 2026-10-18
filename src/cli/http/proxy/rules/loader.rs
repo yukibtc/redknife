@@ -222,7 +222,7 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     use super::*;
-    use crate::cli::command::http::proxy::rules::RuleOutcome;
+    use crate::cli::http::proxy::rules::RuleOutcome;
 
     const INITIAL: &str = r#"
 [[rules]]

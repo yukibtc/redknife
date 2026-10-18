@@ -1,59 +1,10 @@
 use clap::{Parser, Subcommand};
 
-mod command;
+mod http;
+mod ldap;
 
-use self::command::http::{HttpCommand, HttpProxyCommand, HttpProxyRulesCommand};
-use self::command::ldap::LdapCommand;
-
-#[derive(Debug, Parser)]
-#[command(version, about, long_about = None)]
-pub(super) struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-impl Cli {
-    pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
-        match self.command {
-            Command::Http { command } => match command {
-                HttpCommand::Callback { ip, port } => {
-                    command::http::callback::run(ip, port).await?
-                }
-                HttpCommand::Proxy {
-                    command,
-                    ip,
-                    port,
-                    rules,
-                    watch_rules,
-                    dump,
-                    dump_format,
-                } => match command {
-                    Some(HttpProxyCommand::Rules { command }) => match command {
-                        HttpProxyRulesCommand::Example => {
-                            command::http::proxy::rules_example().await?
-                        }
-                    },
-                    None => {
-                        command::http::proxy::run(ip, port, rules, watch_rules, dump, dump_format)
-                            .await?
-                    }
-                },
-                HttpCommand::Send {
-                    target,
-                    file,
-                    output,
-                } => command::http::send::run(target, file, output).await?,
-            },
-            Command::Ldap { command } => match command {
-                LdapCommand::Serve { ip, port, raw } => {
-                    command::ldap::serve::run(ip, port, raw).await?
-                }
-            },
-        }
-
-        Ok(())
-    }
-}
+use self::http::HttpCommand;
+use self::ldap::LdapCommand;
 
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -69,4 +20,22 @@ enum Command {
         #[command(subcommand)]
         command: LdapCommand,
     },
+}
+
+#[derive(Debug, Parser)]
+#[command(version, about, long_about = None)]
+pub(super) struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+impl Cli {
+    pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+        match self.command {
+            Command::Http { command } => command.run().await?,
+            Command::Ldap { command } => command.run().await?,
+        }
+
+        Ok(())
+    }
 }

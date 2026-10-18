@@ -19,3 +19,12 @@ pub(in crate::cli) enum LdapCommand {
         raw: bool,
     },
 }
+
+impl LdapCommand {
+    pub(in crate::cli) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Serve { ip, port, raw } => serve::run(ip, port, raw).await?,
+        }
+        Ok(())
+    }
+}
