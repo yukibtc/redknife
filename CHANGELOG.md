@@ -37,6 +37,7 @@
 ### Added
 
 - Add HTTP proxy request dumps
+- Add HTTP proxy rules
 
 ## 0.3.0 - 2026/10/16
 

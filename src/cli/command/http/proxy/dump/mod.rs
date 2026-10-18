@@ -7,7 +7,7 @@ use tokio::io::AsyncWrite;
 mod text;
 
 use self::text::TextDumpOutput;
-use super::middleware::MiddlewareRequest;
+use super::middleware::MiddlewareEvent;
 
 // TODO: add hex and jsonl
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -35,7 +35,7 @@ impl FromStr for HttpProxyDumpFormat {
 }
 
 impl HttpProxyDumpFormat {
-    pub(super) async fn write<W>(&self, request: &MiddlewareRequest, out: &mut W) -> io::Result<()>
+    pub(super) async fn write<W>(&self, request: &MiddlewareEvent, out: &mut W) -> io::Result<()>
     where
         W: AsyncWrite + Unpin,
     {

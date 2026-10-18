@@ -22,9 +22,10 @@ impl Cli {
                 HttpCommand::Proxy {
                     ip,
                     port,
+                    rules,
                     dump,
                     dump_format,
-                } => command::http::proxy::run(ip, port, dump, dump_format).await?,
+                } => command::http::proxy::run(ip, port, rules, dump, dump_format).await?,
                 HttpCommand::Send {
                     target,
                     file,

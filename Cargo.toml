@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 async-compression = { version = "0.4.50", default-features = false, features = ["tokio", "gzip", "zlib", "deflate", "brotli", "zstd"] }
+base64 = "0.23.1"
 bytes = "1.12.1"
 chrono = "0.4.45"
 clap = { version =  "4.6.7", features = ["derive"] }
@@ -28,7 +29,9 @@ httparse = "1.10.1"
 hyper = { version = "1.12.0", default-features = false, features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
 rustls-native-certs = "0.8"
+serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", default-features = false, features = ["fs", "io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { version = "0.7.20", default-features = false, features = ["codec", "io"] }
+toml = "1.1.8"

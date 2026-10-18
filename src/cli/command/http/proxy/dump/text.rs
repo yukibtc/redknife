@@ -1,41 +1,55 @@
 use std::io;
 
-use bytes::Bytes;
-use chrono::{DateTime, Local};
-use http::Uri;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use super::super::middleware::MiddlewareRequest;
+use super::super::middleware::MiddlewareEvent;
+use super::super::rules::RuleOutcome;
 
 pub(super) struct TextDumpOutput<'a> {
-    id: u64,
-    timestamp: &'a DateTime<Local>,
-    uri: &'a Uri,
-    raw: &'a Bytes,
+    event: &'a MiddlewareEvent,
 }
 
-impl<'a> From<&'a MiddlewareRequest> for TextDumpOutput<'a> {
-    fn from(request: &'a MiddlewareRequest) -> Self {
-        Self {
-            id: request.id,
-            timestamp: &request.timestamp,
-            uri: &request.uri,
-            raw: &request.raw,
-        }
+impl<'a> From<&'a MiddlewareEvent> for TextDumpOutput<'a> {
+    fn from(request: &'a MiddlewareEvent) -> Self {
+        Self { event: request }
     }
 }
 
 impl TextDumpOutput<'_> {
     fn bytes(&self) -> Vec<u8> {
+        let event: &MiddlewareEvent = self.event;
+
+        let outcome: String = match event.report.outcome {
+            RuleOutcome::Continue => "ALLOW".to_string(),
+            RuleOutcome::Deny(code) => format!("DENY {}", code.as_u16()),
+        };
+
         let mut output: Vec<u8> = format!(
-            "[{}] #{} REQUEST to {}\n",
-            self.timestamp.format("%Y-%m-%d %H:%M:%S"),
-            self.id,
-            self.uri,
+            "[{}] #{} REQUEST to {} {}",
+            event.timestamp.format("%Y-%m-%d %H:%M:%S"),
+            event.id,
+            event.uri,
+            outcome,
         )
         .into_bytes();
 
-        output.extend(self.raw);
+        if !event.report.matched_rules.is_empty() {
+            output.extend_from_slice(format!(" rules={:?}", event.report.matched_rules).as_bytes());
+        }
+
+        output.extend_from_slice(
+            format!("\nORIGINAL ({} bytes)\n", event.original_raw.len()).as_bytes(),
+        );
+        output.extend_from_slice(&event.original_raw);
+
+        if let Some(modified_raw) = &event.modified_raw {
+            output.extend_from_slice(
+                format!("\nMODIFIED ({} bytes)\n", modified_raw.len()).as_bytes(),
+            );
+            output.extend_from_slice(modified_raw);
+        }
+
+        output.extend_from_slice(b"\n\n");
 
         output
     }

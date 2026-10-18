@@ -42,10 +42,13 @@ enum HttpProxyError {
     MissingHost,
     #[error("expected an origin-form request target")]
     ExpectedOriginForm,
+    // #[error("request dropped")]
+    // RequestDropped,
 }
 
 pub enum HttpProxyServerHandlerDecision {
     Forward(Box<Request<Bytes>>),
+    Deny(StatusCode),
     //Drop,
 }
 
@@ -99,14 +102,14 @@ async fn forward(
     if req.method() == Method::CONNECT {
         return Ok(text_response(
             StatusCode::NOT_IMPLEMENTED,
-            "HTTPS CONNECT is not supported",
+            "HTTPS CONNECT is not supported\n",
         ));
     }
 
     if req.uri().scheme_str() != Some("http") || req.uri().host().is_none() {
         return Ok(text_response(
             StatusCode::BAD_REQUEST,
-            "Expected an absolute HTTP URI",
+            "Expected an absolute HTTP URI\n",
         ));
     }
 
@@ -136,12 +139,11 @@ async fn forward(
 
     let mut req: Request<Bytes> = match handler.handle(original_uri, req).await? {
         HttpProxyServerHandlerDecision::Forward(req) => *req,
-        // HttpProxyServerHandlerDecision::Drop => {
-        //     return Ok(text_response(
-        //         StatusCode::FORBIDDEN,
-        //         "Request blocked by redknife",
-        //     ));
-        // }
+        HttpProxyServerHandlerDecision::Deny(code) => {
+            return Ok(text_response(code, "Request blocked by redknife\n"));
+        } // HttpProxyServerHandlerDecision::Drop => {
+          //     return Err(HttpProxyError::RequestDropped);
+          // }
     };
 
     if req.uri().scheme().is_some() || req.uri().authority().is_some() {

@@ -36,8 +36,9 @@ pub(in crate::cli) enum HttpCommand {
         /// Local port to listen on
         #[arg(long, default_value_t = 8001)]
         port: u16,
-        // TODO: add --interceptor, which enables a simple interactive CLI, allowing to drop, forward or modify a request.
-        // TODO: add --rules <FILE> to load rules from a TOML file
+        /// Select rules to filter and modify HTTP traffic
+        #[arg(long)]
+        rules: Option<PathBuf>,
         /// Dump requests to file
         #[arg(long)]
         dump: Option<PathBuf>,

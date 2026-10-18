@@ -1,0 +1,56 @@
+# Add, overwrite, and remove request headers.
+[[rules]]
+name = "api-headers"
+
+[rules.match]
+authority = "example.com"
+path_prefix = "/api/"
+
+[rules.headers]
+set = { "X-Assessment" = "redknife", "Authorization" = "Bearer test-token" }
+remove = ["X-Client-Version"]
+
+
+# Replace literal strings in the request body.
+[[rules]]
+name = "edit-login"
+
+[rules.match]
+authority = "app.example.test"
+method = "POST"
+path = "/api/login"
+
+[rules.body]
+replace = [
+    { from = '"remember":false', to = '"remember":true' },
+    { from = '"role":"user"', to = '"role":"admin"' },
+]
+
+
+# Replace the entire body (disabled until needed).
+[[rules]]
+name = "replace-entire-body"
+enabled = false
+
+[rules.match]
+authority = "app.example.test"
+method = "POST"
+path = "/api/profile"
+
+[rules.headers]
+set = { "Content-Type" = "application/json" }
+
+[rules.body]
+set_utf8 = '{"name":"tester","role":"admin"}'
+
+
+# Block selected requests before forwarding.
+[[rules]]
+name = "block-telemetry"
+
+[rules.match]
+authority = "app.example.test"
+path = "/telemetry"
+
+[rules.deny]
+code = 403
