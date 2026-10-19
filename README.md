@@ -8,8 +8,11 @@
 
 ## Features
 
+- **ARP**
+  - **ARP Spoofing**: Poison ARP caches.
+
 - **FTP**
-  - **FTP Server**: A minimal FTP server
+  - **FTP Server**: A minimal FTP server.
 
 - **HTTP**
   - **HTTP Callback Server**: Receive and log incoming HTTP requests.
