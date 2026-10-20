@@ -1,9 +1,10 @@
+use std::io;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 
 use clap::Subcommand;
 
-use crate::net::MacAddr;
+use crate::net::{MacAddr, list_interfaces};
 
 mod resolve;
 mod spoof;
@@ -13,16 +14,15 @@ pub(super) enum ArpCommand {
     /// Resolve an IPv4
     #[command(arg_required_else_help = true)]
     Resolve {
-        /// Network interface to use
-        iface: String,
         /// IP address to resolve
         ip: Ipv4Addr,
+        /// Network interface to use
+        #[arg(long)]
+        iface: Option<String>,
     },
     /// Starts an ARP spoofer
     #[command(arg_required_else_help = true)]
     Spoof {
-        /// Network interface to use
-        iface: String,
         /// IP address of the impersonated gateway
         gateway_ip: Ipv4Addr,
         /// MAC address of the impersonated gateway
@@ -34,6 +34,9 @@ pub(super) enum ArpCommand {
         /// MAC address of the target. If not specified, the spoofer will attempt to resolve it automatically.
         #[arg(long, requires = "target_ip")]
         target_mac: Option<MacAddr>,
+        /// Network interface to use
+        #[arg(long)]
+        iface: Option<String>,
         /// Rate at which ARP packets are sent in milliseconds
         #[arg(long, default_value_t = 500)]
         rate: u64,
@@ -49,7 +52,10 @@ pub(super) enum ArpCommand {
 impl ArpCommand {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            Self::Resolve { iface, ip } => resolve::run(iface, ip).await?,
+            Self::Resolve { iface, ip } => {
+                let iface: String = detect_iface(iface)?;
+                resolve::run(ip, iface).await?;
+            }
             Self::Spoof {
                 iface,
                 gateway_ip,
@@ -60,20 +66,31 @@ impl ArpCommand {
                 burst,
                 dump,
             } => {
+                let iface: String = detect_iface(iface)?;
                 spoof::run(
-                    iface,
                     gateway_ip,
                     gateway_mac,
                     target_ip,
                     target_mac,
+                    iface,
                     rate,
                     burst,
                     dump,
                 )
-                .await?
+                .await?;
             }
         }
 
         Ok(())
+    }
+}
+
+fn detect_iface(iface: Option<String>) -> io::Result<String> {
+    match iface {
+        Some(iface) => Ok(iface),
+        None => list_interfaces()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| io::Error::other("No active network interface found")),
     }
 }

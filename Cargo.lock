@@ -722,6 +722,7 @@ dependencies = [
  "httparse",
  "hyper",
  "hyper-util",
+ "indexmap",
  "libc",
  "notify",
  "rustls-native-certs",

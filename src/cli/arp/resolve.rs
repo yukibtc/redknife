@@ -4,7 +4,9 @@ use std::net::Ipv4Addr;
 use crate::arp::resolve_mac;
 use crate::net::{DataLinkSocket, Host};
 
-pub(super) async fn run(iface: String, ip: Ipv4Addr) -> io::Result<()> {
+pub(super) async fn run(ip: Ipv4Addr, iface: String) -> io::Result<()> {
+    println!("Using interface: {iface}");
+
     let sender: Host = Host::read(&iface)?;
 
     let sock: DataLinkSocket = DataLinkSocket::new(&iface)?;

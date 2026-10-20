@@ -27,15 +27,17 @@ async fn dump_frame(dump: &mut Option<PcapWriter>, frame: &[u8]) {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run(
-    iface: String,
     gateway_ip: Ipv4Addr,
     gateway_mac: Option<MacAddr>,
     target_ip: Option<Ipv4Addr>,
     target_mac: Option<MacAddr>,
+    iface: String,
     rate: u64,
     burst: usize,
     dump: Option<PathBuf>,
 ) -> io::Result<()> {
+    println!("Using interface: {iface}");
+
     let rate: Duration = Duration::from_millis(rate);
 
     // Get spoofer MAC and IP

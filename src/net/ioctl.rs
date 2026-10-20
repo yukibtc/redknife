@@ -1,8 +1,10 @@
-use std::ffi::{CString, c_int, c_ushort};
+use std::ffi::{CStr, CString, c_char, c_int, c_ushort};
 use std::io::{self, ErrorKind};
 use std::mem;
 use std::net::Ipv4Addr;
 
+use indexmap::IndexMap;
+use indexmap::map::Entry;
 use libc::{IF_NAMESIZE, ifreq};
 
 use super::mac::MacAddr;
@@ -24,15 +26,90 @@ fn get_ifr(iface: &str) -> io::Result<ifreq> {
     Ok(ifr)
 }
 
-pub(super) fn read_mac_addr_ioctl(iface: &str) -> io::Result<MacAddr> {
-    let mut ifr: ifreq = get_ifr(iface)?;
-
+fn get_fd() -> io::Result<c_int> {
     let fd: c_int = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
 
     if fd < 0 {
         let err: io::Error = io::Error::last_os_error();
         return Err(io::Error::other(format!("socket(AF_INET) failed: {err}")));
     }
+
+    Ok(fd)
+}
+
+/// List the interfaces with an IPv4 address configured, via ioctl(SIOCGIFCONF).
+/// Returns the interface names with their associated IPv4 address.
+pub(super) fn list_interfaces_ioctl() -> io::Result<IndexMap<String, Ipv4Addr>> {
+    let fd: c_int = get_fd()?;
+
+    // The SIOCGIFCONF ioctl does not report how much space it needs:
+    // start with a small buffer and double it while it comes back full.
+    let mut buf_len: usize = 8 * mem::size_of::<ifreq>();
+    let mut buf: Vec<u8>;
+
+    let ifc_len: usize = loop {
+        buf = vec![0; buf_len];
+
+        let mut ifc: libc::ifconf = libc::ifconf {
+            ifc_len: buf_len as c_int,
+            ifc_ifcu: libc::__c_anonymous_ifc_ifcu {
+                ifcu_buf: buf.as_mut_ptr() as *mut c_char,
+            },
+        };
+
+        if unsafe { libc::ioctl(fd, libc::SIOCGIFCONF, &mut ifc) } < 0 {
+            let err: io::Error = io::Error::last_os_error();
+            unsafe { libc::close(fd) };
+            return Err(io::Error::other(format!("SIOCGIFCONF failed: {err}")));
+        }
+
+        let len: usize = ifc.ifc_len as usize;
+
+        if len < buf_len {
+            break len;
+        }
+
+        buf_len *= 2;
+    };
+
+    unsafe { libc::close(fd) };
+
+    let reqs: *const ifreq = buf.as_ptr() as *const ifreq;
+    let count: usize = ifc_len / mem::size_of::<ifreq>();
+
+    let mut ifaces: IndexMap<String, Ipv4Addr> = IndexMap::with_capacity(count);
+
+    for i in 0..count {
+        let req: &ifreq = unsafe { &*reqs.add(i) };
+
+        let name: String = unsafe { CStr::from_ptr(req.ifr_name.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+
+        // Skip entries without an IPv4 address (e.g. IPv6-only aliases)
+        if unsafe { req.ifr_ifru.ifru_addr.sa_family } != libc::AF_INET as c_ushort {
+            continue;
+        }
+
+        // ifr_addr is a sockaddr_in: sa_data is port (2 bytes, network order)
+        // followed by the IPv4 address (4 bytes, network order)
+        let sa_data: [u8; 14] = unsafe { req.ifr_ifru.ifru_addr.sa_data }.map(|b| b as u8);
+
+        let ip: Ipv4Addr = Ipv4Addr::new(sa_data[2], sa_data[3], sa_data[4], sa_data[5]);
+
+        // The same interface may appear multiple times (one entry per address)
+        if let Entry::Vacant(e) = ifaces.entry(name) {
+            e.insert(ip);
+        }
+    }
+
+    Ok(ifaces)
+}
+
+pub(super) fn read_mac_addr_ioctl(iface: &str) -> io::Result<MacAddr> {
+    let mut ifr: ifreq = get_ifr(iface)?;
+
+    let fd: c_int = get_fd()?;
 
     if unsafe { libc::ioctl(fd, libc::SIOCGIFHWADDR, &mut ifr as *mut ifreq) } < 0 {
         let err: io::Error = io::Error::last_os_error();
@@ -66,12 +143,7 @@ pub(super) fn read_mac_addr_ioctl(iface: &str) -> io::Result<MacAddr> {
 pub(super) fn read_ipv4(iface: &str) -> io::Result<Ipv4Addr> {
     let mut ifr: ifreq = get_ifr(iface)?;
 
-    let fd: c_int = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
-
-    if fd < 0 {
-        let err: io::Error = io::Error::last_os_error();
-        return Err(io::Error::other(format!("socket(AF_INET) failed: {err}")));
-    }
+    let fd: c_int = get_fd()?;
 
     if unsafe { libc::ioctl(fd, libc::SIOCGIFADDR, &mut ifr as *mut ifreq) } < 0 {
         let err: io::Error = io::Error::last_os_error();
