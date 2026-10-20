@@ -10,8 +10,8 @@ mod resolve;
 mod spoof;
 
 #[derive(Debug, Subcommand)]
-pub(super) enum ArpCommand {
-    /// Resolve an IPv4
+pub(super) enum NeighCommand {
+    /// Resolve IP addresses to MAC addresses via ARP (IPv4)
     #[command(arg_required_else_help = true)]
     Resolve {
         /// IP address to resolve
@@ -20,7 +20,7 @@ pub(super) enum ArpCommand {
         #[arg(long)]
         iface: Option<String>,
     },
-    /// Starts an ARP spoofer
+    /// Poison ARP neighbor caches
     #[command(arg_required_else_help = true)]
     Spoof {
         /// IP address of the impersonated gateway
@@ -37,7 +37,7 @@ pub(super) enum ArpCommand {
         /// Network interface to use
         #[arg(long)]
         iface: Option<String>,
-        /// Rate at which ARP packets are sent in milliseconds
+        /// Rate at which spoofing packets are sent in milliseconds
         #[arg(long, default_value_t = 500)]
         rate: u64,
         /// Number of packets to send initially
@@ -49,7 +49,7 @@ pub(super) enum ArpCommand {
     },
 }
 
-impl ArpCommand {
+impl NeighCommand {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             Self::Resolve { iface, ip } => {

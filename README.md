@@ -8,10 +8,6 @@
 
 ## Features
 
-- **ARP**
-  - **ARP Resolver**: Resolve IP addresses to MAC addresses.
-  - **ARP Spoofing**: Poison ARP caches.
-
 - **FTP**
   - **FTP Server**: A minimal FTP server.
 
@@ -22,6 +18,10 @@
 
 - **LDAP**
   - **LDAP Server**: A minimal LDAP server (i.e., for capturing credentials via LDAP pass-back attacks).
+
+- **Neigh (ARP/NDP)**
+  - **Neigh Resolver**: Resolve IP addresses to MAC addresses via ARP (IPv4) or NDP (IPv6). (**NDP not available yet**)
+  - **Neigh Spoofing**: Poison ARP and NDP neighbor caches. (**NDP not available yet**)
 
 ## Install
 

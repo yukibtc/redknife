@@ -1,26 +1,19 @@
 use clap::{Parser, Subcommand};
 
-#[cfg(target_os = "linux")]
-mod arp;
 mod ftp;
 mod http;
 mod ldap;
-
 #[cfg(target_os = "linux")]
-use self::arp::ArpCommand;
+mod neigh;
+
 use self::ftp::FtpCommand;
 use self::http::HttpCommand;
 use self::ldap::LdapCommand;
+#[cfg(target_os = "linux")]
+use self::neigh::NeighCommand;
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// ARP utilities
-    #[cfg(target_os = "linux")]
-    #[command(arg_required_else_help = true)]
-    Arp {
-        #[command(subcommand)]
-        command: ArpCommand,
-    },
     /// FTP utilities
     #[command(arg_required_else_help = true)]
     Ftp {
@@ -39,6 +32,13 @@ enum Command {
         #[command(subcommand)]
         command: LdapCommand,
     },
+    /// Neigh (ARP/NDP) utilities
+    #[cfg(target_os = "linux")]
+    #[command(arg_required_else_help = true)]
+    Neigh {
+        #[command(subcommand)]
+        command: NeighCommand,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -52,10 +52,10 @@ impl Cli {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self.command {
             #[cfg(target_os = "linux")]
-            Command::Arp { command } => command.run().await?,
             Command::Ftp { command } => command.run().await?,
             Command::Http { command } => command.run().await?,
             Command::Ldap { command } => command.run().await?,
+            Command::Neigh { command } => command.run().await?,
         }
 
         Ok(())

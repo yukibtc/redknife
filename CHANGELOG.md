@@ -39,8 +39,8 @@
 - Add HTTP proxy request dumps
 - Add HTTP proxy rules
 - Add `rk ftp serve`
-- Add `rk arp spoof`
-- Add `rk arp resolve`
+- Add `rk neigh resolve`
+- Add `rk neigh spoof`
 
 ## 0.3.0 - 2026/10/16
 
