@@ -51,10 +51,10 @@ pub(super) struct Cli {
 impl Cli {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self.command {
-            #[cfg(target_os = "linux")]
             Command::Ftp { command } => command.run().await?,
             Command::Http { command } => command.run().await?,
             Command::Ldap { command } => command.run().await?,
+            #[cfg(target_os = "linux")]
             Command::Neigh { command } => command.run().await?,
         }
 
