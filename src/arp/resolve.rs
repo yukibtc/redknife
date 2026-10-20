@@ -5,26 +5,25 @@ use tokio::{io, time};
 
 use super::ArpFrame;
 use super::packet::{ArpOpCode, ArpPacket};
-use crate::net::{DataLinkReceiver, DataLinkSender, MacAddr};
+use crate::net::{DataLinkReceiver, DataLinkSender, Host, MacAddr};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 
 pub async fn resolve_mac(
     tx: &DataLinkSender,
     rx: &mut DataLinkReceiver,
-    our_mac: MacAddr,
-    our_ip: Ipv4Addr,
-    ip: Ipv4Addr,
+    sender: Host,
+    target_ip: Ipv4Addr,
 ) -> io::Result<Option<MacAddr>> {
     let req = ArpPacket {
         opcode: ArpOpCode::Request,
-        sender_mac: our_mac,
-        sender_ip: our_ip,
+        sender_mac: sender.mac(),
+        sender_ip: sender.ip(),
         target_mac: MacAddr::UNSPECIFIED,
-        target_ip: ip,
+        target_ip,
     };
 
-    let frame: ArpFrame = ArpFrame::new(MacAddr::BROADCAST, our_mac, req);
+    let frame: ArpFrame = ArpFrame::new(MacAddr::BROADCAST, sender.mac(), req);
 
     tx.send(&frame.encode()).await?;
 
@@ -42,11 +41,11 @@ pub async fn resolve_mac(
                 };
 
                 // Discard our own frames
-                if arp.eth_src == our_mac {
+                if arp.eth_src == sender.mac() {
                     continue;
                 }
 
-                if is_valid_reply(&arp, our_mac, ip) {
+                if is_valid_reply(&arp, sender.mac(), target_ip) {
                     return Ok(Some(arp.sender_mac));
                 }
             }
@@ -55,9 +54,9 @@ pub async fn resolve_mac(
 }
 
 /// Returns `true` if the packet is a valid ARP reply to our request.
-fn is_valid_reply(arp: &ArpPacket, our_mac: MacAddr, ip: Ipv4Addr) -> bool {
+fn is_valid_reply(arp: &ArpPacket, our_mac: MacAddr, target_ip: Ipv4Addr) -> bool {
     arp.opcode.is_reply()
-        && arp.sender_ip == ip
+        && arp.sender_ip == target_ip
         && arp.sender_mac != our_mac
         && !arp.sender_mac.is_broadcast()
         && !arp.sender_mac.is_unspecified()
