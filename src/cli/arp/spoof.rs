@@ -371,8 +371,18 @@ async fn handle_ipv4_packet_forward(
         return Ok(());
     }
 
+    // Skip our own frames echoed back by the socket
+    if dhl.eth_src == spoofer.mac {
+        return Ok(());
+    }
+
     let src_ip: Ipv4Addr = Ipv4Addr::new(frame[26], frame[27], frame[28], frame[29]);
     let dst_ip: Ipv4Addr = Ipv4Addr::new(frame[30], frame[31], frame[32], frame[33]);
+
+    // Skip packets addressed to us: they are for the local stack, not to forward
+    if dst_ip == spoofer.ip {
+        return Ok(());
+    }
 
     if dhl.eth_src == gateway.mac {
         // gateway to target (look in the ARP table)
