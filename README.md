@@ -21,6 +21,7 @@
 
 - **Neigh (ARP/NDP)**
   - **Neigh Resolver**: Resolve IP addresses to MAC addresses via ARP (IPv4) or NDP (IPv6). (**NDP not available yet**)
+  - **Neigh Scanner**: Actively scan a subnet for live hosts via ARP (IPv4) or NDP (IPv6) probing. (**NDP not available yet**)
   - **Neigh Spoofing**: Poison ARP and NDP neighbor caches. (**NDP not available yet**)
 
 ## Install

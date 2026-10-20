@@ -34,7 +34,7 @@ impl<P> DataLinkFrame<P>
 where
     P: DataLinkPayload,
 {
-    #[inline]
+    #[cfg(test)]
     pub fn new(eth_dst: MacAddr, eth_src: MacAddr, payload: P) -> Self {
         Self {
             eth_dst,

@@ -29,6 +29,7 @@ httparse = "1.10.1"
 hyper = { version = "1.12.0", default-features = false, features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
 indexmap = "2.14.2"
+ipnet = "2.12.2"
 notify = "8.2.0"
 rustls-native-certs = "0.8"
 serde = { version = "1.0.229", features = ["derive"] }

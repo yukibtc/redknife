@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashSet};
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
@@ -5,34 +6,45 @@ use tokio::{io, time};
 
 use super::ArpFrame;
 use super::packet::{ArpOpCode, ArpPacket};
-use crate::net::{DataLinkReceiver, DataLinkSender, Host, MacAddr};
+use crate::net::{DataLinkFrame, DataLinkReceiver, DataLinkSender, Host, MacAddr};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 
-pub async fn resolve_mac(
+pub async fn probe_resolve_mac(
     tx: &DataLinkSender,
-    rx: &mut DataLinkReceiver,
     sender: Host,
     target_ip: Ipv4Addr,
-) -> io::Result<Option<MacAddr>> {
-    let req = ArpPacket {
-        opcode: ArpOpCode::Request,
-        sender_mac: sender.mac(),
-        sender_ip: sender.ip(),
-        target_mac: MacAddr::UNSPECIFIED,
-        target_ip,
+) -> io::Result<()> {
+    let frame = DataLinkFrame {
+        eth_dst: MacAddr::BROADCAST,
+        eth_src: sender.mac(),
+        payload: ArpPacket {
+            opcode: ArpOpCode::Request,
+            sender_mac: sender.mac(),
+            sender_ip: sender.ip(),
+            target_mac: MacAddr::UNSPECIFIED,
+            target_ip,
+        },
     };
-
-    let frame: ArpFrame = ArpFrame::new(MacAddr::BROADCAST, sender.mac(), req);
 
     tx.send(&frame.encode()).await?;
 
-    let deadline = time::sleep(TIMEOUT);
+    Ok(())
+}
+
+pub async fn collect_resolved_macs(
+    rx: &mut DataLinkReceiver,
+    sender: Host,
+    target_ips: &mut HashSet<Ipv4Addr>,
+    output: &mut BTreeMap<Ipv4Addr, MacAddr>,
+    timeout: Duration,
+) -> io::Result<()> {
+    let deadline = time::sleep(timeout);
     tokio::pin!(deadline);
 
     loop {
         tokio::select! {
-            _ = &mut deadline => return Ok(None),
+            _ = &mut deadline => return Ok(()),
             frame = rx.next() => {
                 let frame: Vec<u8> = frame?;
 
@@ -45,18 +57,36 @@ pub async fn resolve_mac(
                     continue;
                 }
 
-                if is_valid_reply(&arp, sender.mac(), target_ip) {
-                    return Ok(Some(arp.sender_mac));
+                if is_valid_reply(&arp, sender.mac(), target_ips) {
+                    output.insert(arp.sender_ip, arp.sender_mac);
+                    target_ips.remove(&arp.sender_ip);
+                }
+
+                if target_ips.is_empty() {
+                    return Ok(());
                 }
             }
         }
     }
 }
 
+pub async fn resolve_single_mac(
+    tx: &DataLinkSender,
+    rx: &mut DataLinkReceiver,
+    sender: Host,
+    target_ip: Ipv4Addr,
+) -> io::Result<Option<MacAddr>> {
+    let mut target_ips = HashSet::from([target_ip]);
+    let mut output = BTreeMap::new();
+    probe_resolve_mac(tx, sender, target_ip).await?;
+    collect_resolved_macs(rx, sender, &mut target_ips, &mut output, TIMEOUT).await?;
+    Ok(output.get(&target_ip).copied())
+}
+
 /// Returns `true` if the packet is a valid ARP reply to our request.
-fn is_valid_reply(arp: &ArpPacket, our_mac: MacAddr, target_ip: Ipv4Addr) -> bool {
+fn is_valid_reply(arp: &ArpPacket, our_mac: MacAddr, target_ips: &HashSet<Ipv4Addr>) -> bool {
     arp.opcode.is_reply()
-        && arp.sender_ip == target_ip
+        && target_ips.contains(&arp.sender_ip)
         && arp.sender_mac != our_mac
         && !arp.sender_mac.is_broadcast()
         && !arp.sender_mac.is_unspecified()
@@ -85,7 +115,7 @@ mod tests {
         assert!(is_valid_reply(
             &packet(ArpOpCode::Reply, mac, IP),
             OUR_MAC,
-            IP
+            &HashSet::from([IP])
         ));
     }
 
@@ -95,7 +125,7 @@ mod tests {
         assert!(!is_valid_reply(
             &packet(ArpOpCode::Request, mac, IP),
             OUR_MAC,
-            IP
+            &HashSet::from([IP])
         ));
     }
 
@@ -105,7 +135,7 @@ mod tests {
         assert!(!is_valid_reply(
             &packet(ArpOpCode::Reply, mac, Ipv4Addr::new(10, 0, 0, 1)),
             OUR_MAC,
-            IP
+            &HashSet::from([IP])
         ));
     }
 
@@ -114,7 +144,7 @@ mod tests {
         assert!(!is_valid_reply(
             &packet(ArpOpCode::Reply, OUR_MAC, IP),
             OUR_MAC,
-            IP
+            &HashSet::from([IP])
         ));
     }
 
@@ -123,7 +153,7 @@ mod tests {
         assert!(!is_valid_reply(
             &packet(ArpOpCode::Reply, MacAddr::BROADCAST, IP),
             OUR_MAC,
-            IP
+            &HashSet::from([IP])
         ));
     }
 
@@ -132,7 +162,7 @@ mod tests {
         assert!(!is_valid_reply(
             &packet(ArpOpCode::Reply, MacAddr::UNSPECIFIED, IP),
             OUR_MAC,
-            IP
+            &HashSet::from([IP])
         ));
     }
 }

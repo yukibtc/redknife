@@ -5,6 +5,7 @@ use std::net::Ipv4Addr;
 
 use indexmap::IndexMap;
 use indexmap::map::Entry;
+use ipnet::Ipv4Net;
 use libc::{IF_NAMESIZE, ifreq};
 
 use super::mac::MacAddr;
@@ -173,4 +174,48 @@ pub(super) fn read_ipv4(iface: &str) -> io::Result<Ipv4Addr> {
     Ok(Ipv4Addr::new(
         sa_data[2], sa_data[3], sa_data[4], sa_data[5],
     ))
+}
+
+/// Read the IPv4 network for a given interface via ioctl(SIOCGIFADDR)
+/// and ioctl(SIOCGIFNETMASK)
+pub fn read_ipv4_netmask(iface: &str) -> io::Result<Ipv4Net> {
+    let mut ifr: ifreq = get_ifr(iface)?;
+
+    let fd: c_int = get_fd()?;
+
+    if unsafe { libc::ioctl(fd, libc::SIOCGIFNETMASK, &mut ifr as *mut ifreq) } < 0 {
+        let err: io::Error = io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(io::Error::other(format!(
+            "SIOCGIFNETMASK failed for '{iface}': {err}"
+        )));
+    }
+
+    unsafe { libc::close(fd) };
+
+    let sa_family: c_ushort = unsafe { ifr.ifr_ifru.ifru_netmask.sa_family };
+
+    // Reject interfaces without an IPv4 netmask (e.g. unconfigured ones)
+    if sa_family != libc::AF_INET as c_ushort {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("interface '{iface}' has no IPv4 netmask (sa_family {sa_family})"),
+        ));
+    }
+
+    // ifr_netmask is a sockaddr_in: sa_data is port (2 bytes, network order)
+    // followed by the IPv4 netmask (4 bytes, network order)
+    let sa_data: [u8; 14] = unsafe { ifr.ifr_ifru.ifru_netmask.sa_data }.map(|b| b as u8);
+
+    let mask: Ipv4Addr = Ipv4Addr::new(sa_data[2], sa_data[3], sa_data[4], sa_data[5]);
+
+    let prefix: u8 = mask
+        .octets()
+        .into_iter()
+        .map(|b| b.count_ones() as u8)
+        .sum();
+
+    let ip: Ipv4Addr = read_ipv4(iface)?;
+
+    Ipv4Net::new(ip, prefix).map_err(io::Error::other)
 }

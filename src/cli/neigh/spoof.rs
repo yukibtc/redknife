@@ -63,7 +63,7 @@ pub(super) async fn run(
         Some(mac) => Host::new(gateway_ip, mac),
         None => {
             println!("Resolving gateway MAC address...");
-            match arp::resolve_mac(&tx, &mut rx, spoofer, gateway_ip).await? {
+            match arp::resolve_single_mac(&tx, &mut rx, spoofer, gateway_ip).await? {
                 Some(mac) => {
                     println!("Gateway MAC address: {mac}");
                     Host::new(gateway_ip, mac)
@@ -84,7 +84,7 @@ pub(super) async fn run(
             }
             None => {
                 println!("Resolving target MAC address...");
-                match arp::resolve_mac(&tx, &mut rx, spoofer, target_ip).await? {
+                match arp::resolve_single_mac(&tx, &mut rx, spoofer, target_ip).await? {
                     Some(target_mac) => {
                         println!("Target MAC address: {target_mac}");
                         table.insert(target_ip, target_mac);

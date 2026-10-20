@@ -1,7 +1,7 @@
 use std::io;
 use std::net::Ipv4Addr;
 
-use crate::arp::resolve_mac;
+use crate::arp::resolve_single_mac;
 use crate::net::{DataLinkSocket, Host};
 
 pub(super) async fn run(ip: Ipv4Addr, iface: String) -> io::Result<()> {
@@ -12,9 +12,9 @@ pub(super) async fn run(ip: Ipv4Addr, iface: String) -> io::Result<()> {
     let sock: DataLinkSocket = DataLinkSocket::new(&iface)?;
     let (tx, mut rx) = sock.split();
 
-    match resolve_mac(&tx, &mut rx, sender, ip).await? {
+    match resolve_single_mac(&tx, &mut rx, sender, ip).await? {
         Some(mac) => println!("{mac}"),
-        None => eprintln!("No ARP response received"),
+        None => eprintln!("No response received"),
     }
 
     Ok(())
