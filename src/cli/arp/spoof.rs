@@ -9,7 +9,7 @@ use tokio::{io, signal, time};
 use crate::arp::{self, ArpFrame, ArpOpCode, ArpPacket};
 use crate::net::{
     DataLinkFrame, DataLinkHeader, DataLinkReceiver, DataLinkSender, DataLinkSocket, Host, MacAddr,
-    PcapWriter, read_ipv4,
+    PcapWriter,
 };
 
 /// Delay between packets of the initial burst.
@@ -23,20 +23,6 @@ async fn dump_frame(dump: &mut Option<PcapWriter>, frame: &[u8]) {
             eprintln!("Error writing packet to the dump file: {e}");
         }
     }
-}
-
-fn spoofer_host(iface: &str) -> io::Result<Host> {
-    // Get MAC address of the interface
-    let our_mac: MacAddr = MacAddr::read(iface)?;
-
-    println!("Our MAC address: {our_mac}");
-
-    // Get IPv4 address of the interface (used as ARP request sender IP)
-    let our_ip: Ipv4Addr = read_ipv4(iface)?;
-
-    println!("Our IPv4 address: {our_ip}");
-
-    Ok(Host::new(our_ip, our_mac))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -53,7 +39,10 @@ pub(super) async fn run(
     let rate: Duration = Duration::from_millis(rate);
 
     // Get spoofer MAC and IP
-    let spoofer: Host = spoofer_host(&iface)?;
+    let spoofer: Host = Host::read(&iface)?;
+
+    println!("Our MAC address: {}", spoofer.mac());
+    println!("Our IPv4 address: {}", spoofer.ip());
 
     // ARP table
     let mut table: HashMap<Ipv4Addr, MacAddr> = HashMap::new();

@@ -63,7 +63,7 @@ pub(super) fn read_mac_addr_ioctl(iface: &str) -> io::Result<MacAddr> {
 }
 
 /// Read the IPv4 address for a given interface via ioctl(SIOCGIFADDR)
-pub fn read_ipv4(iface: &str) -> io::Result<Ipv4Addr> {
+pub(super) fn read_ipv4(iface: &str) -> io::Result<Ipv4Addr> {
     let mut ifr: ifreq = get_ifr(iface)?;
 
     let fd: c_int = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
