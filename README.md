@@ -17,12 +17,12 @@
   - **HTTP Send**: Send and replay HTTP and HTTPS requests.
 
 - **LDAP**
-  - **LDAP Server**: A minimal LDAP server (i.e., for capturing credentials via LDAP pass-back attacks).
+  - **LDAP Server**: A minimal LDAP server.
 
-- **Neigh (ARP/NDP)**
-  - **Neigh Resolver**: Resolve IP addresses to MAC addresses via ARP (IPv4) or NDP (IPv6). (**NDP not available yet**)
-  - **Neigh Scanner**: Actively scan a subnet for live hosts via ARP (IPv4) or NDP (IPv6) probing. (**NDP not available yet**)
-  - **Neigh Spoofing**: Poison ARP and NDP neighbor caches. (**NDP not available yet**)
+- **Neighbor (ARP/NDP)**
+  - **Neighbor Resolver**: Resolve IP addresses to MAC addresses via ARP (IPv4) or NDP (IPv6). (**NDP not available yet**)
+  - **Neighbor Scanner**: Actively scan a subnet for live hosts via ARP (IPv4) or NDP (IPv6) probing. (**NDP not available yet**)
+  - **Neighbor Spoofing**: Poison ARP and NDP neighbor caches. (**NDP not available yet**)
 
 ## Install
 
