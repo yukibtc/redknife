@@ -39,7 +39,9 @@
 - Add HTTP proxy request dumps
 - Add HTTP proxy rules
 - Add `rk ftp serve`
+- Add `rk neigh monitor`
 - Add `rk neigh resolve`
+- Add `rk neigh scan`
 - Add `rk neigh spoof`
 
 ## 0.3.0 - 2026/10/16

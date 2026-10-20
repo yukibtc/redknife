@@ -20,9 +20,10 @@
   - **LDAP Server**: A minimal LDAP server.
 
 - **Neighbor (ARP/NDP)**
-  - **Neighbor Resolver**: Resolve IP addresses to MAC addresses via ARP (IPv4) or NDP (IPv6). (**NDP not available yet**)
-  - **Neighbor Scanner**: Actively scan a subnet for live hosts via ARP (IPv4) or NDP (IPv6) probing. (**NDP not available yet**)
-  - **Neighbor Spoofing**: Poison ARP and NDP neighbor caches. (**NDP not available yet**)
+  - **Neighbor Monitor**: Passively monitor neighbor traffic to discover hosts. (**NDP not available yet**)
+  - **Neighbor Resolver**: Resolve IP to MAC addresses. (**NDP not available yet**)
+  - **Neighbor Scanner**: Actively scan a subnet to discover hosts. (**NDP not available yet**)
+  - **Neighbor Spoofing**: Poison neighbor caches. (**NDP not available yet**)
 
 ## Install
 

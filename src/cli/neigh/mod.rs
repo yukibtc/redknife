@@ -8,12 +8,19 @@ use ipnet::Ipv4Net;
 
 use crate::net::{MacAddr, list_interfaces, read_ipv4_netmask};
 
+mod monitor;
 mod resolve;
 mod scan;
 mod spoof;
 
 #[derive(Debug, Subcommand)]
 pub(super) enum NeighCommand {
+    /// Passively monitor traffic to discover hosts
+    Monitor {
+        /// Network interface to use
+        #[arg(long)]
+        iface: Option<String>,
+    },
     /// Resolve a single IP to MAC
     #[command(arg_required_else_help = true)]
     Resolve {
@@ -73,6 +80,10 @@ pub(super) enum NeighCommand {
 impl NeighCommand {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
+            Self::Monitor { iface } => {
+                let iface: String = detect_iface(iface)?;
+                monitor::run(iface).await?;
+            }
             Self::Resolve { iface, ip } => {
                 let iface: String = detect_iface(iface)?;
                 resolve::run(ip, iface).await?;
