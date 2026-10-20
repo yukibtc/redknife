@@ -5,10 +5,19 @@ use clap::Subcommand;
 
 use crate::net::MacAddr;
 
+mod resolve;
 mod spoof;
 
 #[derive(Debug, Subcommand)]
 pub(super) enum ArpCommand {
+    /// Resolve an IPv4
+    #[command(arg_required_else_help = true)]
+    Resolve {
+        /// Network interface to use
+        iface: String,
+        /// IP address to resolve
+        ip: Ipv4Addr,
+    },
     /// Starts an ARP spoofer
     #[command(arg_required_else_help = true)]
     Spoof {
@@ -40,6 +49,7 @@ pub(super) enum ArpCommand {
 impl ArpCommand {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
+            Self::Resolve { iface, ip } => resolve::run(iface, ip).await?,
             Self::Spoof {
                 iface,
                 gateway_ip,
