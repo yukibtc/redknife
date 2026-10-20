@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
 
-#[cfg(target_family = "unix")]
+#[cfg(target_os = "linux")]
 mod arp;
 mod ftp;
 mod http;
 mod ldap;
 
-#[cfg(target_family = "unix")]
+#[cfg(target_os = "linux")]
 use self::arp::ArpCommand;
 use self::ftp::FtpCommand;
 use self::http::HttpCommand;
@@ -15,7 +15,7 @@ use self::ldap::LdapCommand;
 #[derive(Debug, Subcommand)]
 enum Command {
     /// ARP utilities
-    #[cfg(target_family = "unix")]
+    #[cfg(target_os = "linux")]
     #[command(arg_required_else_help = true)]
     Arp {
         #[command(subcommand)]
@@ -51,7 +51,7 @@ pub(super) struct Cli {
 impl Cli {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self.command {
-            #[cfg(target_family = "unix")]
+            #[cfg(target_os = "linux")]
             Command::Arp { command } => command.run().await?,
             Command::Ftp { command } => command.run().await?,
             Command::Http { command } => command.run().await?,

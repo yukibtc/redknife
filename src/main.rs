@@ -2,14 +2,14 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-#[cfg(target_family = "unix")]
+#[cfg(target_os = "linux")]
 mod arp;
 mod cli;
 mod ftp;
 mod hexdump;
 mod http;
 mod ldap;
-#[cfg(target_family = "unix")]
+#[cfg(target_os = "linux")]
 mod net;
 
 use self::cli::Cli;

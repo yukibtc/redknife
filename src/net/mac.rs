@@ -5,7 +5,6 @@ use std::{fmt, io};
 use thiserror::Error;
 
 use super::ioctl::read_mac_addr_ioctl;
-#[cfg(target_os = "linux")]
 use super::sysfs::read_mac_addr_sysfs;
 
 const LEN: usize = 6;
@@ -51,7 +50,6 @@ impl MacAddr {
         }
 
         // Fallback: sysfs (works even where ioctl misbehaves)
-        #[cfg(target_os = "linux")]
         if let Ok(mac) = read_mac_addr_sysfs(iface) {
             if !mac.is_unspecified() {
                 return Ok(mac);
