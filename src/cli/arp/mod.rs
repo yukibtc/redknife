@@ -1,4 +1,5 @@
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
 
 use clap::Subcommand;
 
@@ -30,6 +31,9 @@ pub(super) enum ArpCommand {
         /// Number of packets to send initially
         #[arg(long, default_value_t = 5)]
         burst: usize,
+        /// Path to a pcap file where the spoofed traffic (ARP and forwarded IPv4 packets) will be dumped
+        #[arg(long)]
+        dump: Option<PathBuf>,
     },
 }
 
@@ -44,6 +48,7 @@ impl ArpCommand {
                 target_mac,
                 rate,
                 burst,
+                dump,
             } => {
                 spoof::run(
                     iface,
@@ -53,6 +58,7 @@ impl ArpCommand {
                     target_mac,
                     rate,
                     burst,
+                    dump,
                 )
                 .await?
             }
