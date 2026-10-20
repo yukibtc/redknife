@@ -39,6 +39,7 @@
 - Add HTTP proxy request dumps
 - Add HTTP proxy rules
 - Add minimal FTP Server
+- Add ARP spoofer
 
 ## 0.3.0 - 2026/10/16
 
