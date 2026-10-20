@@ -77,10 +77,14 @@ where
         &self.payload
     }
 
+    #[inline]
     pub fn encode(&self) -> Bytes {
-        let mut bytes: BytesMut = BytesMut::new();
-        bytes.extend(self.header().to_bytes());
-        bytes.extend(self.payload().encode());
+        let header: [u8; 14] = self.header().to_bytes();
+        let payload: Bytes = self.payload().encode();
+
+        let mut bytes: BytesMut = BytesMut::with_capacity(header.len() + payload.len());
+        bytes.extend(header);
+        bytes.extend(payload);
         bytes.freeze()
     }
 }
