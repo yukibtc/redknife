@@ -9,6 +9,7 @@
 ## Features
 
 - **ARP**
+  - **ARP Resolver**: Resolve IP addresses to MAC addresses.
   - **ARP Spoofing**: Poison ARP caches.
 
 - **FTP**
