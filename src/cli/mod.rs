@@ -1,11 +1,13 @@
 use clap::{Parser, Subcommand};
 
+mod dns;
 mod ftp;
 mod http;
 mod ldap;
 #[cfg(target_os = "linux")]
 mod neigh;
 
+use self::dns::DnsCommand;
 use self::ftp::FtpCommand;
 use self::http::HttpCommand;
 use self::ldap::LdapCommand;
@@ -14,6 +16,12 @@ use self::neigh::NeighCommand;
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// DNS utilities
+    #[command(arg_required_else_help = true)]
+    Dns {
+        #[command(subcommand)]
+        command: DnsCommand,
+    },
     /// FTP utilities
     #[command(arg_required_else_help = true)]
     Ftp {
@@ -51,6 +59,7 @@ pub(super) struct Cli {
 impl Cli {
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self.command {
+            Command::Dns { command } => command.run().await?,
             Command::Ftp { command } => command.run().await?,
             Command::Http { command } => command.run().await?,
             Command::Ldap { command } => command.run().await?,

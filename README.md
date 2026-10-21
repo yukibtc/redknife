@@ -8,6 +8,9 @@
 
 ## Features
 
+- **DNS**
+  - **DNS Query**: Query DNS servers.
+
 - **FTP**
   - **FTP Server**: A minimal FTP server.
 

@@ -38,6 +38,7 @@
 
 - Add HTTP proxy request dumps
 - Add HTTP proxy rules
+- Add `rk dns query`
 - Add `rk ftp serve`
 - Add `rk neigh monitor`
 - Add `rk neigh resolve`
