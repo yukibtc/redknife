@@ -58,7 +58,7 @@ pub(super) fn list_interfaces_ioctl() -> io::Result<IndexMap<String, Ipv4Addr>> 
             },
         };
 
-        if unsafe { libc::ioctl(fd, libc::SIOCGIFCONF, &mut ifc) } < 0 {
+        if unsafe { libc::ioctl(fd, libc::SIOCGIFCONF as _, &mut ifc) } < 0 {
             let err: io::Error = io::Error::last_os_error();
             unsafe { libc::close(fd) };
             return Err(io::Error::other(format!("SIOCGIFCONF failed: {err}")));
@@ -112,7 +112,7 @@ pub(super) fn read_mac_addr_ioctl(iface: &str) -> io::Result<MacAddr> {
 
     let fd: c_int = get_fd()?;
 
-    if unsafe { libc::ioctl(fd, libc::SIOCGIFHWADDR, &mut ifr as *mut ifreq) } < 0 {
+    if unsafe { libc::ioctl(fd, libc::SIOCGIFHWADDR as _, &mut ifr as *mut ifreq) } < 0 {
         let err: io::Error = io::Error::last_os_error();
         unsafe { libc::close(fd) };
         return Err(io::Error::other(format!(
@@ -146,7 +146,7 @@ pub(super) fn read_ipv4(iface: &str) -> io::Result<Ipv4Addr> {
 
     let fd: c_int = get_fd()?;
 
-    if unsafe { libc::ioctl(fd, libc::SIOCGIFADDR, &mut ifr as *mut ifreq) } < 0 {
+    if unsafe { libc::ioctl(fd, libc::SIOCGIFADDR as _, &mut ifr as *mut ifreq) } < 0 {
         let err: io::Error = io::Error::last_os_error();
         unsafe { libc::close(fd) };
         return Err(io::Error::other(format!(
@@ -183,7 +183,7 @@ pub fn read_ipv4_netmask(iface: &str) -> io::Result<Ipv4Net> {
 
     let fd: c_int = get_fd()?;
 
-    if unsafe { libc::ioctl(fd, libc::SIOCGIFNETMASK, &mut ifr as *mut ifreq) } < 0 {
+    if unsafe { libc::ioctl(fd, libc::SIOCGIFNETMASK as _, &mut ifr as *mut ifreq) } < 0 {
         let err: io::Error = io::Error::last_os_error();
         unsafe { libc::close(fd) };
         return Err(io::Error::other(format!(
