@@ -26,12 +26,16 @@ precommit: fmt check clippy test deny
 build:
     cargo build --release --locked
 
-# Compile static Linux binaries
+# Compile Linux binaries
 linux:
     bash contrib/script/build-linux.sh
 
+# Compile Windows binaries
+windows:
+    bash contrib/script/build-windows.sh
+
 # Build all release artifacts
-artifacts: linux
+artifacts: linux windows
     bash contrib/script/generate-licenses.sh
     bash contrib/script/prepare-artifacts.sh
     bash contrib/script/sign-artifacts.sh

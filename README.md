@@ -38,17 +38,14 @@
   
 ## Supported platforms
 
-`redknife` is built and actively tested on Linux. Other platforms may work but are not tested at this time.
+`redknife` is built and actively tested on Linux. Other platforms are not actively tested at this time and may not be fully featured.
 
-The CI verifies that `redknife` also builds on Windows and macOS,
-but full support for these platforms is not guaranteed.
-
-For this reason, only Linux binaries are precompiled and distributed. 
+Precompiled binaries are distributed for Linux and Windows; on other platforms, `redknife` must be built from source. 
 Below you can find instructions for both precompiled binaries and installing from source.
 
 ## Install
 
-**Get compiled artifact from releases (Linux only)**
+**Get compiled artifact from releases**
 
 Download the archive for your architecture from [GitHub Releases](https://github.com/yukibtc/redknife/releases).
 
@@ -60,11 +57,16 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-Extract the downloaded archive and run `rk`:
+Extract the downloaded  `.tar.gz` archive and run:
 
 ```bash
-tar -xzf rk-<version>-<target>.tar.gz
 ./rk --help
+```
+
+On Windows, extract the `.zip` archive and run:
+
+```powershell
+.\rk.exe --help
 ```
 
 Optionally, install `rk` system-wide to run it from any directory (requires `sudo`):

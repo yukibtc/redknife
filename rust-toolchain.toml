@@ -1,9 +1,15 @@
 [toolchain]
 channel = "1.88.0" # MSRV
 profile = "minimal"
-components = ["clippy", "rustfmt"]
+components = ["clippy", "rustfmt", "llvm-tools"]
 targets = [
+    # Linux
     "i686-unknown-linux-musl",
     "x86_64-unknown-linux-musl",
     "aarch64-unknown-linux-musl",
+
+    # Windows
+    "i686-pc-windows-gnu",
+    "x86_64-pc-windows-gnu",
+    "aarch64-pc-windows-gnullvm",
 ]

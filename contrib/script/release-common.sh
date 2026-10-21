@@ -12,6 +12,8 @@ CARGO_ZIGBUILD_VERSION=0.23.4
 ZIGLANG_VERSION=0.15.2
 # shellcheck disable=SC2034
 LINUX_TARGETS=(x86_64-unknown-linux-musl aarch64-unknown-linux-musl i686-unknown-linux-musl)
+# shellcheck disable=SC2034
+WINDOWS_TARGETS=(i686-pc-windows-gnu x86_64-pc-windows-gnu aarch64-pc-windows-gnullvm)
 
 read_package_version() {
     python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["package"]["version"])' "$PROJECT_ROOT/Cargo.toml"

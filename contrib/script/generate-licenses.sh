@@ -49,5 +49,6 @@ fi
 append_license "MUSL $musl_version (Zig $ZIG_VERSION) - COPYRIGHT" "$ZIG_LIB_DIR/libc/musl/COPYRIGHT"
 append_license "Zig $ZIG_VERSION - Runtime license" "$ZIG_DIR/LICENSE"
 append_license "LLVM - Runtime and libunwind licenses" "$ZIG_LIB_DIR/libunwind/LICENSE.TXT"
+append_license "mingw-w64 (Zig $ZIG_VERSION) - Runtime license" "$ZIG_LIB_DIR/libc/mingw/COPYING"
 
 mv "$temporary" dist/THIRD_PARTY_LICENSES.txt

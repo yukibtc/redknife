@@ -35,6 +35,15 @@ for target in "${LINUX_TARGETS[@]}"; do
     artifacts+=("$artifact")
 done
 
+# Prepare Windows artifacts
+for target in "${WINDOWS_TARGETS[@]}"; do
+    artifact="rk-$version-$target.zip"
+    install -m 755 "target/$target/release/rk.exe" "$staging_dir/rk.exe"
+    install -m 644 dist/THIRD_PARTY_LICENSES.txt "$staging_dir/THIRD_PARTY_LICENSES.txt"
+    zip -j "$artifact_dir/$artifact" "$staging_dir/rk.exe" "$staging_dir/LICENSE" "$staging_dir/THIRD_PARTY_LICENSES.txt"
+    artifacts+=("$artifact")
+done
+
 cd "$artifact_dir"
 
 sha256sum "${artifacts[@]}" > SHA256SUMS
