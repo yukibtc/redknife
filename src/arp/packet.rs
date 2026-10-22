@@ -1,13 +1,12 @@
 use std::net::Ipv4Addr;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use libc::{ETH_P_ARP, ETH_P_IP};
 use thiserror::Error;
 
 use crate::net::{DataLinkPayload, MacAddr, MacAddrParseError};
 
-const ETHERTYPE_ARP: u16 = ETH_P_ARP as u16;
-const ETHERTYPE_IPV4: u16 = ETH_P_IP as u16;
+const ETHERTYPE_ARP: u16 = 0x0806;
+const ETHERTYPE_IPV4: u16 = 0x0800;
 const LEN: usize = 28;
 
 const OPCODE_REQUEST: u16 = 1;
