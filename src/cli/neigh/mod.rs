@@ -49,12 +49,15 @@ pub(super) enum NeighCommand {
         attempts: NonZeroUsize,
     },
     /// Poison ARP neighbor caches
-    #[command(arg_required_else_help = true)]
     Spoof {
-        /// IP address of the impersonated gateway
-        gateway_ip: Ipv4Addr,
-        /// MAC address of the impersonated gateway
+        /// Network interface to use.
         #[arg(long)]
+        iface: Option<String>,
+        /// IP address of the impersonated gateway
+        #[arg(long)]
+        gateway_ip: Option<Ipv4Addr>,
+        /// MAC address of the impersonated gateway
+        #[arg(long, requires = "gateway_ip")]
         gateway_mac: Option<MacAddr>,
         /// IP address of the target. If not specified, the spoof will be in broadcast mode.
         #[arg(long)]
@@ -62,9 +65,6 @@ pub(super) enum NeighCommand {
         /// MAC address of the target. If not specified, the spoofer will attempt to resolve it automatically.
         #[arg(long, requires = "target_ip")]
         target_mac: Option<MacAddr>,
-        /// Network interface to use
-        #[arg(long)]
-        iface: Option<String>,
         /// Rate at which spoofing packets are sent in milliseconds
         #[arg(long, default_value_t = 500)]
         rate: u64,
@@ -111,11 +111,11 @@ impl NeighCommand {
             } => {
                 let iface: String = detect_iface(iface)?;
                 spoof::run(
+                    iface,
                     gateway_ip,
                     gateway_mac,
                     target_ip,
                     target_mac,
-                    iface,
                     rate,
                     burst,
                     dump,

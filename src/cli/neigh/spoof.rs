@@ -9,7 +9,7 @@ use tokio::{io, signal, time};
 use crate::arp::{self, ArpFrame, ArpOpCode, ArpPacket};
 use crate::net::{
     DataLinkFrame, DataLinkHeader, DataLinkReceiver, DataLinkSender, DataLinkSocket, Host, MacAddr,
-    PcapWriter,
+    PcapWriter, read_ipv4_gateway_sysfs,
 };
 
 /// Delay between packets of the initial burst.
@@ -27,11 +27,11 @@ async fn dump_frame(dump: &mut Option<PcapWriter>, frame: &[u8]) {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run(
-    gateway_ip: Ipv4Addr,
+    iface: String,
+    gateway_ip: Option<Ipv4Addr>,
     gateway_mac: Option<MacAddr>,
     target_ip: Option<Ipv4Addr>,
     target_mac: Option<MacAddr>,
-    iface: String,
     rate: u64,
     burst: usize,
     dump: Option<PathBuf>,
@@ -58,7 +58,18 @@ pub(super) async fn run(
         None => None,
     };
 
-    // Attempt to resolve the gateway MAC, and make gateway Host
+    // Attempt to resolve gateway IP
+    let gateway_ip: Ipv4Addr = match gateway_ip {
+        Some(ip) => ip,
+        None => {
+            println!("Resolving gateway IP address...");
+            let ip: Ipv4Addr = read_ipv4_gateway_sysfs(&iface)?;
+            println!("Gateway IP address: {ip}");
+            ip
+        }
+    };
+
+    // Attempt to resolve the gateway MAC
     let gateway: Host = match gateway_mac {
         Some(mac) => Host::new(gateway_ip, mac),
         None => {

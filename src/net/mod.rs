@@ -12,6 +12,7 @@ pub use self::ioctl::read_ipv4_netmask;
 pub use self::layer::datalink::*;
 pub use self::mac::{MacAddr, MacAddrParseError};
 pub use self::pcap::PcapWriter;
+pub use self::sysfs::read_ipv4_gateway_sysfs;
 
 /// List the active network interfaces with an IPv4 address configured,
 /// excluding loopback ones.
