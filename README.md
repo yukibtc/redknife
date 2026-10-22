@@ -28,9 +28,19 @@
   - **Neighbor Scanner**: Actively scan a subnet to discover hosts. (**NDP not available yet**)
   - **Neighbor Spoofing**: Poison neighbor caches. (**NDP not available yet**)
 
+## Supported platforms
+
+`redknife` is built and actively tested on Linux. Other platforms may work but are not tested at this time.
+
+The CI verifies that `redknife` also builds on Windows and macOS,
+but full support for these platforms is not guaranteed.
+
+For this reason, only Linux binaries are precompiled and distributed. 
+Below you can find instructions for both precompiled binaries and installing from source.
+
 ## Install
 
-**Get compiled artifact from releases**
+**Get compiled artifact from releases (Linux only)**
 
 Download the archive for your architecture from [GitHub Releases](https://github.com/yukibtc/redknife/releases).
 
@@ -61,7 +71,9 @@ or user-wide (ensure `~/.local/bin` is in your `PATH`):
 install -m 755 rk ~/.local/bin/rk
 ```
 
-**Install using cargo from git**
+**Install using cargo from source**
+
+The following command requires `rustc` and `cargo`, and will build and install `redknife` directly from the git repository:
 
 ```bash
 cargo install redknife --git https://github.com/yukibtc/redknife
