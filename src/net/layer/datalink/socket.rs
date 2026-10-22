@@ -129,7 +129,7 @@ impl DataLinkSocket {
         ioctl_fionbio(&fd, true)?;
 
         Ok(Self {
-            fd: AsyncFd::new(fd)?,
+            fd: unsafe { AsyncFd::register(fd)? },
         })
     }
 
