@@ -44,32 +44,23 @@ where
     }
 
     pub fn decode(buf: &[u8]) -> Result<Self, DataLinkFrameError<P::Error>> {
-        if buf.len() < DataLinkHeader::LEN {
-            return Err(DataLinkFrameError::TooShort);
-        }
-
-        let mut header: [u8; DataLinkHeader::LEN] = [0; DataLinkHeader::LEN];
-        header.copy_from_slice(&buf[..DataLinkHeader::LEN]);
-        let header: DataLinkHeader = DataLinkHeader::from_byte_array(header);
+        let header: DataLinkHeader =
+            DataLinkHeader::extract(buf).map_err(|_| DataLinkFrameError::TooShort)?;
 
         let payload: &[u8] = &buf[DataLinkHeader::LEN..];
         let payload: P =
-            P::decode(header.ethertype, payload).map_err(DataLinkFrameError::Payload)?;
+            P::decode(header.ethertype(), payload).map_err(DataLinkFrameError::Payload)?;
 
         Ok(Self {
-            eth_dst: header.eth_dst,
-            eth_src: header.eth_src,
+            eth_dst: header.eth_dst(),
+            eth_src: header.eth_src(),
             payload,
         })
     }
 
     #[inline]
     pub fn header(&self) -> DataLinkHeader {
-        DataLinkHeader {
-            eth_dst: self.eth_dst,
-            eth_src: self.eth_src,
-            ethertype: self.payload.ethertype(),
-        }
+        DataLinkHeader::new(self.eth_dst, self.eth_src, self.payload.ethertype())
     }
 
     #[inline]
@@ -160,9 +151,9 @@ mod tests {
     fn header() {
         let header = frame().header();
 
-        assert_eq!(header.eth_dst, DST);
-        assert_eq!(header.eth_src, SRC);
-        assert_eq!(header.ethertype, 0x0001);
+        assert_eq!(header.eth_dst(), DST);
+        assert_eq!(header.eth_src(), SRC);
+        assert_eq!(header.ethertype(), 0x0001);
     }
 
     #[test]

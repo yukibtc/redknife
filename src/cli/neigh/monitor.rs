@@ -34,14 +34,18 @@ pub(super) async fn run(iface: String) -> io::Result<()> {
             continue;
         }
 
-        if arp.sender_mac.is_broadcast() || arp.sender_mac.is_unspecified() {
+        if arp.sender_mac().is_broadcast() || arp.sender_mac().is_unspecified() {
             continue;
         }
 
-        match table.insert(arp.sender_ip, arp.sender_mac) {
-            None => println!("{} -> {}", arp.sender_ip, arp.sender_mac),
-            Some(old) if old != arp.sender_mac => {
-                eprintln!("{} changed MAC! {old} -> {}", arp.sender_ip, arp.sender_mac)
+        match table.insert(arp.sender_ip(), arp.sender_mac()) {
+            None => println!("{} -> {}", arp.sender_ip(), arp.sender_mac()),
+            Some(old) if old != arp.sender_mac() => {
+                eprintln!(
+                    "{} changed MAC! {old} -> {}",
+                    arp.sender_ip(),
+                    arp.sender_mac()
+                )
             }
             _ => {}
         }

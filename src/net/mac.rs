@@ -28,17 +28,6 @@ impl MacAddr {
         Self(addr)
     }
 
-    pub const fn from_slice(bytes: &[u8]) -> Result<Self, MacAddrParseError> {
-        if bytes.len() != LEN {
-            return Err(MacAddrParseError);
-        }
-
-        let mut addr: [u8; LEN] = [0; LEN];
-        addr.copy_from_slice(bytes);
-
-        Ok(Self(addr))
-    }
-
     /// Read MAC address for a given interface
     #[inline]
     pub fn read(iface: &str) -> io::Result<Self> {
@@ -65,6 +54,11 @@ impl MacAddr {
     #[inline]
     pub const fn as_bytes(&self) -> &[u8; LEN] {
         &self.0
+    }
+
+    #[inline]
+    pub const fn to_bytes(self) -> [u8; LEN] {
+        self.0
     }
 
     #[inline]

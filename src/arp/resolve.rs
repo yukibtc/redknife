@@ -18,13 +18,13 @@ pub async fn probe_resolve_mac(
     let frame = DataLinkFrame {
         eth_dst: MacAddr::BROADCAST,
         eth_src: sender.mac(),
-        payload: ArpPacket {
-            opcode: ArpOpCode::Request,
-            sender_mac: sender.mac(),
-            sender_ip: sender.ip(),
-            target_mac: MacAddr::UNSPECIFIED,
+        payload: ArpPacket::new(
+            ArpOpCode::Request,
+            sender.mac(),
+            sender.ip(),
+            MacAddr::UNSPECIFIED,
             target_ip,
-        },
+        ),
     };
 
     tx.send(&frame.encode()).await?;
@@ -58,8 +58,8 @@ pub async fn collect_resolved_macs(
                 }
 
                 if is_valid_reply(&arp, sender.mac(), target_ips) {
-                    output.insert(arp.sender_ip, arp.sender_mac);
-                    target_ips.remove(&arp.sender_ip);
+                    output.insert(arp.sender_ip(), arp.sender_mac());
+                    target_ips.remove(&arp.sender_ip());
                 }
 
                 if target_ips.is_empty() {
@@ -85,11 +85,11 @@ pub async fn resolve_single_mac(
 
 /// Returns `true` if the packet is a valid ARP reply to our request.
 fn is_valid_reply(arp: &ArpPacket, our_mac: MacAddr, target_ips: &HashSet<Ipv4Addr>) -> bool {
-    arp.opcode.is_reply()
-        && target_ips.contains(&arp.sender_ip)
-        && arp.sender_mac != our_mac
-        && !arp.sender_mac.is_broadcast()
-        && !arp.sender_mac.is_unspecified()
+    arp.opcode().is_reply()
+        && target_ips.contains(&arp.sender_ip())
+        && arp.sender_mac() != our_mac
+        && !arp.sender_mac().is_broadcast()
+        && !arp.sender_mac().is_unspecified()
 }
 
 #[cfg(test)]
@@ -100,13 +100,13 @@ mod tests {
     const IP: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 1);
 
     fn packet(opcode: ArpOpCode, sender_mac: MacAddr, sender_ip: Ipv4Addr) -> ArpPacket {
-        ArpPacket {
+        ArpPacket::new(
             opcode,
             sender_mac,
             sender_ip,
-            target_mac: MacAddr::UNSPECIFIED,
-            target_ip: Ipv4Addr::UNSPECIFIED,
-        }
+            MacAddr::UNSPECIFIED,
+            Ipv4Addr::UNSPECIFIED,
+        )
     }
 
     #[test]

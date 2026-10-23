@@ -10,7 +10,7 @@ mod sysfs;
 pub use self::host::Host;
 pub use self::ioctl::read_ipv4_netmask;
 pub use self::layer::datalink::*;
-pub use self::mac::{MacAddr, MacAddrParseError};
+pub use self::mac::MacAddr;
 pub use self::pcap::PcapWriter;
 pub use self::sysfs::read_ipv4_gateway_sysfs;
 
