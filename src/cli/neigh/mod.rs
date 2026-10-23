@@ -6,12 +6,13 @@ use std::path::PathBuf;
 use clap::Subcommand;
 use ipnet::Ipv4Net;
 
-use crate::net::{MacAddr, list_interfaces, read_ipv4_netmask};
-
 mod monitor;
 mod resolve;
 mod scan;
 mod spoof;
+
+use self::spoof::NeighSpoofFormat;
+use crate::net::{MacAddr, list_interfaces, read_ipv4_netmask};
 
 #[derive(Debug, Subcommand)]
 pub(super) enum NeighCommand {
@@ -71,6 +72,9 @@ pub(super) enum NeighCommand {
         /// Number of packets to send initially
         #[arg(long, default_value_t = 5)]
         burst: usize,
+        /// The format to use for writing to stdout.
+        #[arg(long, default_value_t = NeighSpoofFormat::Summary)]
+        stdout_format: NeighSpoofFormat,
         /// Path to a pcap file where the spoofed traffic (ARP and forwarded IPv4 packets) will be dumped
         #[arg(long)]
         dump: Option<PathBuf>,
@@ -107,6 +111,7 @@ impl NeighCommand {
                 target_mac,
                 rate,
                 burst,
+                stdout_format,
                 dump,
             } => {
                 let iface: String = detect_iface(iface)?;
@@ -118,6 +123,7 @@ impl NeighCommand {
                     target_mac,
                     rate,
                     burst,
+                    stdout_format,
                     dump,
                 )
                 .await?;
