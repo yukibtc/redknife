@@ -34,7 +34,7 @@ pub(in crate::cli) enum HttpCommand {
         #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))]
         ip: IpAddr,
         /// Local TCP port to listen on
-        #[arg(long, default_value_t = 8000)]
+        #[arg(long, default_value_t = 9000)]
         port: u16,
     },
     /// Inspect, intercept, modify, and forward/drop HTTP traffic.
@@ -53,7 +53,7 @@ pub(in crate::cli) enum HttpCommand {
         #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))]
         ip: IpAddr,
         /// Local port to listen on
-        #[arg(long, default_value_t = 8001)]
+        #[arg(long, default_value_t = 8080)]
         port: u16,
         /// Select rules to filter and modify HTTP traffic
         #[arg(long)]
