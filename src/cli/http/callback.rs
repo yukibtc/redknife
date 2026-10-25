@@ -15,6 +15,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tokio::task::JoinSet;
 
+use crate::logger;
+
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
 struct Output {
@@ -71,7 +73,7 @@ async fn handle_request(
     let body = match Limited::new(body, MAX_BODY_SIZE).collect().await {
         Ok(body) => body.to_bytes(),
         Err(error) => {
-            eprintln!("Failed to read request body: {error}");
+            tracing::error!("Failed to read request body: {error}");
             return Ok(text_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "Payload too large\n",
@@ -88,20 +90,26 @@ async fn handle_request(
         body,
     };
 
+    // Write to stdout, so piping is possible. Tracing logs are written to stderr.
     println!("{output}");
 
     Ok(text_response(StatusCode::OK, "OK\n"))
 }
 
 pub async fn run(ip: IpAddr, port: u16) -> io::Result<()> {
+    logger::init()?;
+
     let addr: SocketAddr = SocketAddr::new(ip, port);
 
     let listener: TcpListener = TcpListener::bind(addr).await?;
 
     let mut connections: JoinSet<()> = JoinSet::new();
 
-    println!("Listening at http://{}/", listener.local_addr()?);
-    println!("Ctrl+C to stop.\n");
+    tracing::info!(
+        "HTTP Callback listening on http://{}/",
+        listener.local_addr()?
+    );
+    tracing::info!("Ctrl+C to stop.");
 
     loop {
         tokio::select! {
@@ -119,14 +127,14 @@ pub async fn run(ip: IpAddr, port: u16) -> io::Result<()> {
                         .serve_connection(io, service)
                         .await
                     {
-                        eprintln!("HTTP connection error: {error}");
+                        tracing::error!("HTTP connection error: {error}");
                     }
                 });
             }
 
             Some(result) = connections.join_next(), if !connections.is_empty() => {
                 if let Err(error) = result {
-                    eprintln!("Connection task error: {error}");
+                    tracing::error!("Connection task error: {error}");
                 }
             }
 
@@ -139,7 +147,7 @@ pub async fn run(ip: IpAddr, port: u16) -> io::Result<()> {
 
     connections.shutdown().await;
 
-    println!("\nListener stopped.");
+    tracing::info!("Listener stopped.");
 
     Ok(())
 }
