@@ -22,7 +22,7 @@ use tokio_rustls::rustls::{self, ClientConfig, RootCertStore};
 
 use super::compression::{UnpackError, unpack_request};
 use super::request::normalize_body_headers;
-use super::response::{HttpResponseError, write_response};
+use super::response::write_response;
 use super::target::HttpTarget;
 
 #[derive(Debug, Error)]
@@ -37,8 +37,6 @@ pub enum HttpClientError {
     Host(#[from] InvalidHeaderValue),
     #[error("Cannot unpack HTTP request: {0}")]
     Unpack(#[from] UnpackError),
-    #[error("{0}")]
-    Response(#[from] HttpResponseError),
     #[error("HTTP request timed out: {0}")]
     Timeout(#[from] time::error::Elapsed),
     #[error("TLS configuration error: {0}")]
@@ -230,7 +228,7 @@ mod tests {
                         .await
                         .unwrap_err();
 
-                let HttpClientError::Response(HttpResponseError::Output(error)) = error else {
+                let HttpClientError::IO(error) = error else {
                     panic!("expected an output write error");
                 };
 

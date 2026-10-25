@@ -1,26 +1,26 @@
 use std::io;
+use std::io::Error;
+use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use http::header::CONNECTION;
 use http::uri::InvalidUri;
 use http::{HeaderMap, HeaderName, Method, Request, Response, StatusCode, Uri};
+use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full, Limited};
 use hyper::body::Incoming;
-use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use thiserror::Error;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::task;
 
-use super::body::{HttpBody, HttpBodyError};
 use super::compression::{UnpackError, unpack_request, unpack_response};
 use super::constant::MAX_BODY_SIZE;
 use super::request::{HttpWireRequestError, normalize_body_headers};
+use super::server::HttpServerHandler;
 
 type ClientBuilder = hyper::client::conn::http1::Builder;
-type ServerBuilder = hyper::server::conn::http1::Builder;
 
 #[derive(Debug, Error)]
 enum HttpProxyError {
@@ -30,8 +30,6 @@ enum HttpProxyError {
     Uri(#[from] InvalidUri),
     #[error("HTTP proxy protocol error: {0}")]
     Hyper(#[from] hyper::Error),
-    #[error("Cannot read intercepted request body: {0}")]
-    Body(#[from] HttpBodyError),
     #[error("Cannot unpack intercepted request: {0}")]
     Unpack(#[from] UnpackError),
     #[error("HTTP wire request error: {0}")]
@@ -46,59 +44,60 @@ enum HttpProxyError {
     // RequestDropped,
 }
 
-pub enum HttpProxyServerHandlerDecision {
+pub enum HttpProxyHandlerDecision {
     Forward(Box<Request<Bytes>>),
     Deny(StatusCode),
     //Drop,
 }
 
-pub trait HttpProxyServerHandler: Send + Sync {
+pub trait HttpProxyHandler: Send + Sync {
     fn handle(
         &self,
         uri: Uri,
         req: Request<Bytes>,
-    ) -> Pin<Box<dyn Future<Output = io::Result<HttpProxyServerHandlerDecision>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = io::Result<HttpProxyHandlerDecision>> + Send + '_>>;
 }
 
-pub struct HttpProxyServer {
-    listener: TcpListener,
-    handler: Arc<dyn HttpProxyServerHandler>,
+pub struct HttpProxyService<T> {
+    handler: T,
 }
 
-impl HttpProxyServer {
+impl<T> HttpProxyService<T>
+where
+    T: HttpProxyHandler,
+{
     #[inline]
-    pub fn new(listener: TcpListener, handler: Arc<dyn HttpProxyServerHandler>) -> Self {
-        Self { listener, handler }
+    pub fn new(handler: T) -> Self {
+        Self { handler }
     }
+}
 
-    pub async fn run(self) -> io::Result<()> {
-        loop {
-            let (stream, _) = self.listener.accept().await?;
-            let io: TokioIo<TcpStream> = TokioIo::new(stream);
-            let handler: Arc<dyn HttpProxyServerHandler> = self.handler.clone();
-
-            task::spawn(async move {
-                let service = service_fn(move |req| {
-                    let handler: Arc<dyn HttpProxyServerHandler> = handler.clone();
-                    async move { forward(req, handler).await }
-                });
-
-                let _ = ServerBuilder::new()
-                    .preserve_header_case(true)
-                    .title_case_headers(true)
-                    .serve_connection(io, service)
-                    .with_upgrades()
-                    .await;
-            });
-        }
+impl<T> HttpServerHandler for HttpProxyService<T>
+where
+    T: HttpProxyHandler,
+{
+    fn handle_request<'a>(
+        &'a self,
+        req: Request<Incoming>,
+        _client: SocketAddr,
+    ) -> Pin<Box<dyn Future<Output = Response<BoxBody<Bytes, Error>>> + Send + 'a>> {
+        Box::pin(async move {
+            forward(req, &self.handler).await.unwrap_or_else(|err| {
+                tracing::error!("Error forwarding request: {}", err);
+                text_response(StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong.\n")
+            })
+        })
     }
 }
 
 // Inspired by https://github.com/hyperium/hyper/blob/ea5b49b7d4e18c1eaa7f42db0ff91d1dcca56a04/examples/http_proxy.rs
-async fn forward(
+async fn forward<T>(
     req: Request<Incoming>,
-    handler: Arc<dyn HttpProxyServerHandler>,
-) -> Result<Response<HttpBody>, HttpProxyError> {
+    handler: &T,
+) -> Result<Response<BoxBody<Bytes, io::Error>>, HttpProxyError>
+where
+    T: HttpProxyHandler,
+{
     if req.method() == Method::CONNECT {
         return Ok(text_response(
             StatusCode::NOT_IMPLEMENTED,
@@ -138,10 +137,10 @@ async fn forward(
     normalize_body_headers(&mut req);
 
     let mut req: Request<Bytes> = match handler.handle(original_uri, req).await? {
-        HttpProxyServerHandlerDecision::Forward(req) => *req,
-        HttpProxyServerHandlerDecision::Deny(code) => {
+        HttpProxyHandlerDecision::Forward(req) => *req,
+        HttpProxyHandlerDecision::Deny(code) => {
             return Ok(text_response(code, "Request blocked by redknife\n"));
-        } // HttpProxyServerHandlerDecision::Drop => {
+        } // HttpProxyHandlerDecision::Drop => {
           //     return Err(HttpProxyError::RequestDropped);
           // }
     };
@@ -153,7 +152,7 @@ async fn forward(
     remove_hop_by_hop(req.headers_mut());
     normalize_body_headers(&mut req);
 
-    let req: Request<HttpBody> =
+    let req: Request<BoxBody<Bytes, io::Error>> =
         req.map(|body| Full::new(body).map_err(|never| match never {}).boxed());
 
     let stream: TcpStream = TcpStream::connect((host.as_str(), port)).await?;
@@ -220,17 +219,17 @@ fn remove_hop_by_hop(headers: &mut HeaderMap) {
     }
 }
 
-fn empty() -> HttpBody {
+fn empty() -> BoxBody<Bytes, io::Error> {
     Empty::new().map_err(|never| match never {}).boxed()
 }
 
-fn full(text: &'static str) -> HttpBody {
+fn full(text: &'static str) -> BoxBody<Bytes, io::Error> {
     Full::new(Bytes::from_static(text.as_bytes()))
         .map_err(|never| match never {})
         .boxed()
 }
 
-fn text_response(status: StatusCode, text: &'static str) -> Response<HttpBody> {
+fn text_response(status: StatusCode, text: &'static str) -> Response<BoxBody<Bytes, io::Error>> {
     Response::builder()
         .status(status)
         .header("content-type", "text/plain; charset=utf-8")

@@ -3,33 +3,24 @@ use std::io;
 use bytes::Bytes;
 use http::Response;
 use http_body_util::BodyExt;
+use http_body_util::combinators::BoxBody;
 use hyper::body::Body;
-use thiserror::Error;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use super::body::{HttpBody, HttpBodyError};
 use super::compression::unpack_response;
-
-#[derive(Debug, Error)]
-pub enum HttpResponseError {
-    #[error("Cannot read HTTP response body: {0}")]
-    Body(#[from] HttpBodyError),
-    #[error("Cannot write HTTP response: {0}")]
-    Output(#[from] io::Error),
-}
 
 /// Write metadata and an automatically unpacked body without collecting it.
 pub async fn write_response<B, W>(
     response: Response<B>,
     is_head: bool,
     output: &mut W,
-) -> Result<(), HttpResponseError>
+) -> io::Result<()>
 where
     B: Body<Data = Bytes> + Send + Sync + Unpin + 'static,
-    B::Error: Into<HttpBodyError>,
+    B::Error: std::error::Error + Send + Sync,
     W: AsyncWrite + Unpin,
 {
-    let mut response: Response<HttpBody> = unpack_response(response, is_head);
+    let mut response: Response<BoxBody<Bytes, io::Error>> = unpack_response(response, is_head);
 
     let mut head: Vec<u8> =
         format!("{:?} {}\r\n", response.version(), response.status()).into_bytes();
@@ -73,10 +64,9 @@ mod tests {
             Response::new(StreamBody::new(stream::iter(frames)));
         let mut output: Vec<u8> = Vec::new();
 
-        let result: Result<(), HttpResponseError> =
-            write_response(response, false, &mut output).await;
+        let result = write_response(response, false, &mut output).await;
 
-        assert!(matches!(result, Err(HttpResponseError::Body(_))));
+        assert!(result.is_err());
         assert!(output.ends_with(b"\r\n\r\npartial"));
     }
 
@@ -88,10 +78,9 @@ mod tests {
             .unwrap();
         let mut output: Vec<u8> = Vec::new();
 
-        let result: Result<(), HttpResponseError> =
-            write_response(response, false, &mut output).await;
+        let result = write_response(response, false, &mut output).await;
 
-        assert!(matches!(result, Err(HttpResponseError::Body(_))));
+        assert!(result.is_err());
         assert_eq!(output, b"HTTP/1.1 200 OK\r\n\r\n");
     }
 }

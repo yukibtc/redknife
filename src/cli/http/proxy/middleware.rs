@@ -9,7 +9,7 @@ use http::{Request, Uri};
 use tokio::sync::{mpsc, watch};
 
 use super::rules::{RuleOutcome, RuleReport, Rules};
-use crate::http::proxy::{HttpProxyServerHandler, HttpProxyServerHandlerDecision};
+use crate::http::proxy::{HttpProxyHandler, HttpProxyHandlerDecision};
 use crate::http::request::format_request;
 
 #[derive(Clone)]
@@ -48,12 +48,12 @@ impl HttpProxyServerMiddleware {
     }
 }
 
-impl HttpProxyServerHandler for HttpProxyServerMiddleware {
+impl HttpProxyHandler for HttpProxyServerMiddleware {
     fn handle(
         &self,
         uri: Uri,
         mut req: Request<Bytes>,
-    ) -> Pin<Box<dyn Future<Output = io::Result<HttpProxyServerHandlerDecision>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = io::Result<HttpProxyHandlerDecision>> + Send + '_>> {
         Box::pin(async move {
             let id: u64 = self.next_id();
             let timestamp: DateTime<Local> = Local::now();
@@ -90,8 +90,8 @@ impl HttpProxyServerHandler for HttpProxyServerMiddleware {
                 .map_err(io::Error::other)?;
 
             Ok(match outcome {
-                RuleOutcome::Continue => HttpProxyServerHandlerDecision::Forward(Box::new(req)),
-                RuleOutcome::Deny(code) => HttpProxyServerHandlerDecision::Deny(code),
+                RuleOutcome::Continue => HttpProxyHandlerDecision::Forward(Box::new(req)),
+                RuleOutcome::Deny(code) => HttpProxyHandlerDecision::Deny(code),
             })
         })
     }
@@ -120,10 +120,7 @@ mod tests {
             .handle(uri.clone(), request.clone())
             .await
             .unwrap();
-        assert!(matches!(
-            decision,
-            HttpProxyServerHandlerDecision::Forward(_)
-        ));
+        assert!(matches!(decision, HttpProxyHandlerDecision::Forward(_)));
         assert!(events.try_recv().unwrap().report.matched_rules.is_empty());
 
         // The same middleware uses the next published rule set
@@ -142,7 +139,7 @@ deny = { code = 429 }
 
         assert!(matches!(
             decision,
-            HttpProxyServerHandlerDecision::Deny(StatusCode::TOO_MANY_REQUESTS)
+            HttpProxyHandlerDecision::Deny(StatusCode::TOO_MANY_REQUESTS)
         ));
         assert_eq!(
             events.try_recv().unwrap().report.matched_rules,
@@ -165,7 +162,7 @@ deny = { code = 429 }
             .unwrap();
 
         let decision = middleware.handle(uri, request).await.unwrap();
-        let HttpProxyServerHandlerDecision::Forward(request) = decision else {
+        let HttpProxyHandlerDecision::Forward(request) = decision else {
             panic!("Request was unexpectedly blocked");
         };
 

@@ -15,7 +15,8 @@ mod rules;
 pub(super) use self::format::HttpProxyFormat;
 use self::middleware::{HttpProxyServerMiddleware, MiddlewareEvent};
 use self::rules::loader::RulesLoader;
-use crate::http::proxy::{HttpProxyServer, HttpProxyServerHandler};
+use crate::http::proxy::HttpProxyService;
+use crate::http::server::{HttpServer, HttpServerHandler};
 
 pub(super) async fn rules_example() -> io::Result<()> {
     let mut stdout: Stdout = io::stdout();
@@ -41,7 +42,7 @@ pub(super) async fn run(
     let mut stdout: Stdout = io::stdout();
     let mut stderr: Stderr = io::stderr();
 
-    stderr.write_all(b"HTTP proxy listening on ").await?;
+    stderr.write_all(b"HTTP Proxy listening on ").await?;
     stderr
         .write_all(listener.local_addr()?.to_string().as_bytes())
         .await?;
@@ -53,14 +54,14 @@ pub(super) async fn run(
     let middleware: HttpProxyServerMiddleware = HttpProxyServerMiddleware::new(sender, rules);
 
     // Create the HTTP proxy server
-    let handler: Arc<dyn HttpProxyServerHandler> = Arc::new(middleware);
-    let proxy: HttpProxyServer = HttpProxyServer::new(listener, handler);
+    let proxy: HttpProxyService<HttpProxyServerMiddleware> = HttpProxyService::new(middleware);
+    let handler: Arc<dyn HttpServerHandler> = Arc::new(proxy);
+    let server = HttpServer::new(listener, handler);
 
     tokio::select! {
-        result = proxy.run() => result?,
+        result = server.run(signal::ctrl_c()) => result?,
         result = writer(&mut stdout, receiver, stdout_format, dump, dump_format) => result?,
         result = reloader.run(&mut stderr) => result?,
-        result = signal::ctrl_c() => result?,
     }
 
     Ok(())

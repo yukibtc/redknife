@@ -1,11 +1,15 @@
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::{io, path};
 
 use tokio::net::TcpListener;
 use tokio::signal;
 
-use crate::http::server::HttpServer;
+mod handler;
+
+use self::handler::Service;
+use crate::http::server::{HttpServer, HttpServerHandler};
 use crate::logger;
 
 pub(super) async fn run(ip: IpAddr, port: u16, dir: PathBuf, upload: bool) -> io::Result<()> {
@@ -32,9 +36,11 @@ pub(super) async fn run(ip: IpAddr, port: u16, dir: PathBuf, upload: bool) -> io
         tracing::info!("Files will be uploaded at '{}'", upload_dir.display());
     }
 
-    let server: HttpServer = HttpServer::new(listener, dir, upload_dir);
-
     tracing::info!("Ctrl+C to stop.");
+
+    let service: Service = Service::new(dir, upload_dir);
+    let handler: Arc<dyn HttpServerHandler> = Arc::new(service);
+    let server: HttpServer = HttpServer::new(listener, handler);
 
     server.run(signal::ctrl_c()).await?;
 

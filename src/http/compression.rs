@@ -11,6 +11,7 @@ use bytes::{Bytes, BytesMut};
 use futures_util::{TryStreamExt, stream};
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, TRAILER, TRANSFER_ENCODING};
 use http::{HeaderMap, Request, Response, StatusCode};
+use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, StreamBody};
 use hyper::body::{Body, Frame};
 use thiserror::Error;
@@ -18,7 +19,6 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, BufReader};
 use tokio::task;
 use tokio_util::io::{ReaderStream, StreamReader};
 
-use super::body::{HttpBody, HttpBodyError};
 use super::constant::MAX_BODY_SIZE;
 use super::request::normalize_body_headers;
 
@@ -160,10 +160,13 @@ pub async fn unpack_request(request: &mut Request<Bytes>) -> Result<bool, Unpack
 ///
 /// Decode a response without collecting it. The caller supplies HEAD semantics,
 /// since response metadata alone cannot identify a response to a HEAD request.
-pub fn unpack_response<B>(response: Response<B>, is_head: bool) -> Response<HttpBody>
+pub fn unpack_response<B>(
+    response: Response<B>,
+    is_head: bool,
+) -> Response<BoxBody<Bytes, io::Error>>
 where
     B: Body<Data = Bytes> + Send + Sync + Unpin + 'static,
-    B::Error: Into<HttpBodyError>,
+    B::Error: std::error::Error + Send + Sync,
 {
     let status: StatusCode = response.status();
 
@@ -179,15 +182,12 @@ where
     };
 
     let Some(encodings) = encodings else {
-        return response.map(|body| body.map_err(Into::into).boxed());
+        return response.map(|body| body.map_err(io::Error::other).boxed());
     };
 
     let (mut parts, body) = response.into_parts();
 
-    let stream = body.into_data_stream().map_err(|error| {
-        let error: HttpBodyError = error.into();
-        io::Error::other(error)
-    });
+    let stream = body.into_data_stream().map_err(io::Error::other);
 
     // Initialize on the first body poll so even deflate's prefix detection does
     // not delay response headers or lose them on cancellation/network failure.
@@ -206,7 +206,7 @@ where
         parts.headers.remove(header);
     }
 
-    let stream = stream.map_ok(Frame::data).map_err(HttpBodyError::IO);
+    let stream = stream.map_ok(Frame::data);
 
     Response::from_parts(parts, StreamBody::new(stream).boxed())
 }
