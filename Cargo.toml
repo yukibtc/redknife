@@ -40,6 +40,8 @@ tokio = { version = "1.54.1", default-features = false, features = ["fs", "io-st
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { version = "0.7.20", default-features = false, features = ["codec", "io"] }
 toml = "1.1.8"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1.1.5", features = ["std", "net", "time"] }

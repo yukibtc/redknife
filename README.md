@@ -18,6 +18,7 @@
   - **HTTP Callback Server**: Receive and log incoming HTTP requests.
   - **HTTP Proxy**: Inspect, intercept, modify, and forward/drop HTTP requests.
   - **HTTP Send**: Send and replay HTTP and HTTPS requests.
+  - **HTTP Server**: Serve a directory over HTTP with optional file upload support.
 
 - **LDAP**
   - **LDAP Server**: A minimal LDAP server.

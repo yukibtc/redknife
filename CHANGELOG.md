@@ -40,6 +40,7 @@
 - Add HTTP proxy rules
 - Add `rk dns query`
 - Add `rk ftp serve`
+- Add `rk http serve`
 - Add `rk neigh monitor`
 - Add `rk neigh resolve`
 - Add `rk neigh scan`
