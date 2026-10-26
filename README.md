@@ -6,6 +6,8 @@
   <strong>A Swiss Army knife for offensive security.</strong>
 </p>
 
+<p align="center">Red teaming and pentesting tools bundled into a single binary — one tool, many blades.</p>
+
 ## Features
 
 - **DNS**
