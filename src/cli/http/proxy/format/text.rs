@@ -44,7 +44,7 @@ impl TextOutput<'_> {
 
         if let Some(modified_raw) = &event.modified_raw {
             output.extend_from_slice(
-                format!("\nMODIFIED ({} bytes)\n", modified_raw.len()).as_bytes(),
+                format!("\n\nMODIFIED ({} bytes)\n", modified_raw.len()).as_bytes(),
             );
             output.extend_from_slice(modified_raw);
         }
