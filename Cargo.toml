@@ -16,6 +16,8 @@ categories = ["command-line-utilities", "network-programming"]
 name = "rk"
 path = "src/main.rs"
 
+
+
 [dependencies]
 async-compression = { version = "0.4.50", default-features = false, features = ["tokio", "gzip", "zlib", "deflate", "brotli", "zstd"] }
 base64 = "0.23.1"
@@ -31,7 +33,7 @@ hyper = { version = "1.12.0", default-features = false, features = ["server", "c
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
 indexmap = "2.14.2"
 ipnet = "2.12.2"
-jsonwebtoken = { version = "11.1.0", default-features = false }
+jsonwebtoken = { version = "11.1.0", default-features = false, features = ["rust_crypto"] }
 notify = "8.2.0"
 rand = "0.10.3"
 rustls-native-certs = "0.8"

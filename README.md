@@ -11,7 +11,7 @@
 ## Features
 
 - **Codec & Crypto utils**
-  - **JWT**: Decode JSON Web Tokens.
+  - **JWT**: JSON Web Token encoding and decoding.
 
 - **DNS**
   - **DNS Query**: Query DNS servers.
