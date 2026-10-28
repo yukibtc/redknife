@@ -1,3 +1,5 @@
+use std::io::{self, Read};
+
 use clap::Subcommand;
 
 mod decode;
@@ -10,13 +12,13 @@ pub(in crate::cli) enum JwtCommand {
     /// Decode a JWT
     #[command(arg_required_else_help = true)]
     Decode {
-        /// JWT to decode
+        /// JWT to decode, or `-` to read from stdin
         jwt: String,
     },
     /// Encode a JWT
     #[command(arg_required_else_help = true)]
     Encode {
-        /// Claims as JSON
+        /// Claims as JSON, or `-` to read from stdin
         claims: String,
         /// JWT to decode
         #[arg(long, default_value_t = JwtAlg::HS256)]
@@ -30,14 +32,31 @@ pub(in crate::cli) enum JwtCommand {
 impl JwtCommand {
     pub(super) fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            Self::Decode { jwt } => decode::run(jwt)?,
+            Self::Decode { jwt } => {
+                let jwt: String = str_from_arg_or_stdin(jwt)?;
+                decode::run(jwt)?
+            }
             Self::Encode {
                 claims,
                 alg,
                 secret,
-            } => encode::run(alg, claims, secret)?,
+            } => {
+                let claims: String = str_from_arg_or_stdin(claims)?;
+                encode::run(alg, claims, secret)?
+            }
         };
 
         Ok(())
+    }
+}
+
+fn str_from_arg_or_stdin(arg: String) -> io::Result<String> {
+    match arg.as_str() {
+        "-" => {
+            let mut buffer = String::new();
+            io::stdin().read_to_string(&mut buffer)?;
+            Ok(buffer)
+        }
+        _ => Ok(arg),
     }
 }
