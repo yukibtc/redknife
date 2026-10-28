@@ -1,11 +1,10 @@
-use std::io::{self, Read};
-
 use clap::Subcommand;
 
 mod decode;
 mod encode;
 
 use self::encode::JwtAlg;
+use crate::cli::str_from_arg_or_stdin;
 
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum JwtCommand {
@@ -47,16 +46,5 @@ impl JwtCommand {
         };
 
         Ok(())
-    }
-}
-
-fn str_from_arg_or_stdin(arg: String) -> io::Result<String> {
-    match arg.as_str() {
-        "-" => {
-            let mut buffer = String::new();
-            io::stdin().read_to_string(&mut buffer)?;
-            Ok(buffer)
-        }
-        _ => Ok(arg),
     }
 }

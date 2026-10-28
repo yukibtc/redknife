@@ -1,3 +1,6 @@
+use std::io;
+use std::io::Read;
+
 use clap::{Parser, Subcommand};
 
 mod codec;
@@ -78,5 +81,16 @@ impl Cli {
         }
 
         Ok(())
+    }
+}
+
+fn str_from_arg_or_stdin(arg: String) -> io::Result<String> {
+    match arg.as_str() {
+        "-" => {
+            let mut buffer = String::new();
+            io::stdin().read_to_string(&mut buffer)?;
+            Ok(buffer)
+        }
+        _ => Ok(arg),
     }
 }
