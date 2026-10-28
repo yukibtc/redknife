@@ -1,5 +1,6 @@
-use std::io;
-use std::io::Read;
+use std::fs::File;
+use std::io::{self, Read};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
@@ -92,5 +93,24 @@ fn str_from_arg_or_stdin(arg: String) -> io::Result<String> {
             Ok(buffer)
         }
         _ => Ok(arg),
+    }
+}
+
+fn bytes_from_file_or_stdin(file: PathBuf) -> io::Result<Vec<u8>> {
+    match file
+        .to_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file path"))?
+    {
+        "-" => {
+            let mut buffer = Vec::new();
+            io::stdin().read_to_end(&mut buffer)?;
+            Ok(buffer)
+        }
+        _ => {
+            let mut buffer = Vec::new();
+            let mut file = File::open(file)?;
+            file.read_to_end(&mut buffer)?;
+            Ok(buffer)
+        }
     }
 }

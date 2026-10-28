@@ -13,6 +13,7 @@
 - **Codec & Crypto utils**
   - **JWT**: JSON Web Token encoding and decoding.
   - **URL**: URL encoding and decoding.
+  - **XOR**: XOR encoding and decoding.
 
 - **DNS**
   - **DNS Query**: Query DNS servers.
