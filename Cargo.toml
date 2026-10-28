@@ -16,10 +16,8 @@ categories = ["command-line-utilities", "network-programming"]
 name = "rk"
 path = "src/main.rs"
 
-
-
 [dependencies]
-async-compression = { version = "0.4.50", default-features = false, features = ["tokio", "gzip", "zlib", "deflate", "brotli", "zstd"] }
+async-compression = { version = "0.4.51", default-features = false, features = ["tokio", "gzip", "zlib", "deflate", "brotli", "zstd"] }
 base64 = "0.23.1"
 bytes = "1.12.1"
 chrono = "0.4.45"
