@@ -2,7 +2,7 @@
 //!
 //! https://man7.org/linux/man-pages/man7/netdevice.7.html
 
-use std::ffi::{CStr, c_char, c_int, c_ushort};
+use std::ffi::{CStr, c_char, c_int, c_ulong, c_ushort};
 use std::io::{self, ErrorKind};
 use std::mem;
 use std::net::Ipv4Addr;
@@ -34,12 +34,26 @@ struct sockaddr {
     sa_data: [u8; 14],
 }
 
-/// `struct ifmap` from `<linux/if.h>`
+/// `struct ifmap` from `<include/uapi/linux/if.h>`
+///
+/// ```c
+/// struct ifmap {
+///     unsigned long mem_start;
+///     unsigned long mem_end;
+///     unsigned short base_addr;
+///     unsigned char irq;
+///     unsigned char dma;
+///     unsigned char port;
+///     /* 3 bytes spare */
+/// };
+/// ```
+///
+/// <https://github.com/torvalds/linux/blob/eec517cdb4810b3843eb7707971de3164088bff1/include/uapi/linux/if.h#L196>
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ifmap {
-    _mem_start: usize,
-    _mem_end: usize,
+    _mem_start: c_ulong,
+    _mem_end: c_ulong,
     _base_addr: c_ushort,
     _irq: u8,
     _dma: u8,
@@ -91,8 +105,15 @@ struct ifconf {
     ifc_ifcu: ifc_ifcu,
 }
 
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(mem::size_of::<ifreq>() == 40);
+#[cfg(target_pointer_width = "32")]
+const _: () = assert!(mem::size_of::<ifreq>() == 32);
+
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(mem::size_of::<ifconf>() == 16);
+#[cfg(target_pointer_width = "32")]
+const _: () = assert!(mem::size_of::<ifconf>() == 8);
 
 fn get_ifr(iface: &str) -> io::Result<ifreq> {
     if iface.len() >= IF_NAMESIZE || iface.contains('\0') {
