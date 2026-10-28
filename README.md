@@ -10,6 +10,9 @@
 
 ## Features
 
+- **Codec & Crypto utils**
+  - **JWT**: Decode JSON Web Tokens.
+
 - **DNS**
   - **DNS Query**: Query DNS servers.
 
@@ -30,7 +33,7 @@
   - **Neighbor Resolver**: Resolve IP to MAC addresses. (**NDP not available yet**)
   - **Neighbor Scanner**: Actively scan a subnet to discover hosts. (**NDP not available yet**)
   - **Neighbor Spoofing**: Poison neighbor caches. (**NDP not available yet**)
-
+  
 ## Supported platforms
 
 `redknife` is built and actively tested on Linux. Other platforms may work but are not tested at this time.

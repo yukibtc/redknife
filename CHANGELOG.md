@@ -38,6 +38,7 @@
 
 - Add HTTP proxy request dumps
 - Add HTTP proxy rules
+- Add `rk codec jwt decode`
 - Add `rk dns query`
 - Add `rk ftp serve`
 - Add `rk http serve`
