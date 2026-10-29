@@ -38,10 +38,6 @@
 
 - Add HTTP proxy request dumps
 - Add HTTP proxy rules
-- Add `rk codec jwt decode` and `rk codec jwt encode`
-- Add `rk codec url decode` and `rk codec url encode` 
-- Add `rk codec xor`
-- Add `rk codec powershell encode` and `rk codec powershell decode`
 - Add `rk dns query`
 - Add `rk ftp serve`
 - Add `rk http serve`
@@ -49,6 +45,10 @@
 - Add `rk neigh resolve`
 - Add `rk neigh scan`
 - Add `rk neigh spoof`
+- Add `rk util jwt decode` and `rk util jwt encode`
+- Add `rk util url decode` and `rk util url encode`
+- Add `rk util xor`
+- Add `rk util powershell encode` and `rk util powershell decode`
 
 ## 0.3.0 - 2026/10/16
 

@@ -12,7 +12,7 @@ use self::powershell::PowerShellCommand;
 use self::url::UrlCommand;
 
 #[derive(Debug, Subcommand)]
-pub(in crate::cli) enum CodecCommand {
+pub(in crate::cli) enum UtilCommand {
     /// JWT utilities
     Jwt {
         #[command(subcommand)]
@@ -43,7 +43,7 @@ pub(in crate::cli) enum CodecCommand {
     },
 }
 
-impl CodecCommand {
+impl UtilCommand {
     pub(in crate::cli) fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             Self::Jwt { command } => command.run()?,

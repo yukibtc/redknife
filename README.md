@@ -10,12 +10,6 @@
 
 ## Features
 
-- **Codec & Crypto**
-  - **JWT**: JSON Web Token encoding, decoding and signing.
-  - **PowerShell**: PowerShell `-EncodedCommand` strings (base64 of UTF-16LE) encoding and decoding.
-  - **URL**: Percent-encoding and decoding.
-  - **XOR**: Reversible XOR transform.
-
 - **DNS**
   - **DNS Query**: Query DNS servers.
 
@@ -36,7 +30,13 @@
   - **Neighbor Resolver**: Resolve IP to MAC addresses. (**NDP not available yet**)
   - **Neighbor Scanner**: Actively scan a subnet to discover hosts. (**NDP not available yet**)
   - **Neighbor Spoofing**: Poison neighbor caches. (**NDP not available yet**)
-  
+
+- **Utilities**
+  - **JWT**: JSON Web Token encoding, decoding and signing.
+  - **PowerShell**: PowerShell `-EncodedCommand` strings (base64 of UTF-16LE) encoding and decoding.
+  - **URL**: Percent-encoding and decoding.
+  - **XOR**: Reversible XOR transform.  
+
 ## Supported platforms
 
 `redknife` is built and actively tested on Linux. Other platforms are not actively tested at this time and may not be fully featured.

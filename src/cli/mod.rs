@@ -4,30 +4,24 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-mod codec;
 mod dns;
 mod ftp;
 mod http;
 mod ldap;
 #[cfg(target_os = "linux")]
 mod neigh;
+mod util;
 
-use self::codec::CodecCommand;
 use self::dns::DnsCommand;
 use self::ftp::FtpCommand;
 use self::http::HttpCommand;
 use self::ldap::LdapCommand;
 #[cfg(target_os = "linux")]
 use self::neigh::NeighCommand;
+use self::util::UtilCommand;
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Codec & Crypto utilities
-    #[command(arg_required_else_help = true)]
-    Codec {
-        #[command(subcommand)]
-        command: CodecCommand,
-    },
     /// DNS utilities
     #[command(arg_required_else_help = true)]
     Dns {
@@ -59,6 +53,12 @@ enum Command {
         #[command(subcommand)]
         command: NeighCommand,
     },
+    /// Utilities (JWT, XOR, PowerShell, URL, etc)
+    #[command(arg_required_else_help = true)]
+    Util {
+        #[command(subcommand)]
+        command: UtilCommand,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -72,13 +72,13 @@ impl Cli {
     // TODO: create tokio runtime only for async commands
     pub(super) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self.command {
-            Command::Codec { command } => command.run()?,
             Command::Dns { command } => command.run().await?,
             Command::Ftp { command } => command.run().await?,
             Command::Http { command } => command.run().await?,
             Command::Ldap { command } => command.run().await?,
             #[cfg(target_os = "linux")]
             Command::Neigh { command } => command.run().await?,
+            Command::Util { command } => command.run()?,
         }
 
         Ok(())
