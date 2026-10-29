@@ -41,6 +41,7 @@
 - Add `rk codec jwt decode` and `rk codec jwt encode`
 - Add `rk codec url decode` and `rk codec url encode` 
 - Add `rk codec xor`
+- Add `rk codec powershell encode` and `rk codec powershell decode`
 - Add `rk dns query`
 - Add `rk ftp serve`
 - Add `rk http serve`

@@ -10,10 +10,11 @@
 
 ## Features
 
-- **Codec & Crypto utils**
-  - **JWT**: JSON Web Token encoding and decoding.
-  - **URL**: URL encoding and decoding.
-  - **XOR**: XOR encoding and decoding.
+- **Codec & Crypto**
+  - **JWT**: JSON Web Token encoding, decoding and signing.
+  - **PowerShell**: PowerShell `-EncodedCommand` strings (base64 of UTF-16LE) encoding and decoding.
+  - **URL**: Percent-encoding and decoding.
+  - **XOR**: Reversible XOR transform.
 
 - **DNS**
   - **DNS Query**: Query DNS servers.
