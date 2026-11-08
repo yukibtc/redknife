@@ -10,7 +10,7 @@ mod http;
 mod ldap;
 #[cfg(target_os = "linux")]
 mod neigh;
-mod pivot;
+mod port;
 mod util;
 
 use self::dns::DnsCommand;
@@ -19,7 +19,7 @@ use self::http::HttpCommand;
 use self::ldap::LdapCommand;
 #[cfg(target_os = "linux")]
 use self::neigh::NeighCommand;
-use self::pivot::PivotCommand;
+use self::port::PortCommand;
 use self::util::UtilCommand;
 
 #[derive(Debug, Subcommand)]
@@ -55,11 +55,11 @@ enum Command {
         #[command(subcommand)]
         command: NeighCommand,
     },
-    /// Pivoting utilities
+    /// Port utilities
     #[command(arg_required_else_help = true)]
-    Pivot {
+    Port {
         #[command(subcommand)]
-        command: PivotCommand,
+        command: PortCommand,
     },
     /// Utilities (JWT, XOR, PowerShell, URL, etc)
     #[command(arg_required_else_help = true)]
@@ -86,7 +86,7 @@ impl Cli {
             Command::Ldap { command } => command.run().await?,
             #[cfg(target_os = "linux")]
             Command::Neigh { command } => command.run().await?,
-            Command::Pivot { command } => command.run().await?,
+            Command::Port { command } => command.run().await?,
             Command::Util { command } => command.run()?,
         }
 

@@ -5,7 +5,7 @@ use clap::Subcommand;
 mod forward;
 
 #[derive(Debug, Subcommand)]
-pub(in crate::cli) enum PivotCommand {
+pub(in crate::cli) enum PortCommand {
     /// Forward TCP connections from a listener to target
     #[command(arg_required_else_help = true)]
     Forward {
@@ -16,7 +16,7 @@ pub(in crate::cli) enum PivotCommand {
     },
 }
 
-impl PivotCommand {
+impl PortCommand {
     pub(in crate::cli) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             Self::Forward { listen, target } => forward::run(listen, target).await?,

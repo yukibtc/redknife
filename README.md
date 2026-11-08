@@ -31,7 +31,7 @@
   - **Neighbor Scanner**: Actively scan a subnet to discover hosts. (**NDP not available yet**)
   - **Neighbor Spoofing**: Poison neighbor caches. (**NDP not available yet**)
 
-- **Pivot**
+- **Port**
   - **Port Forward**: Forward TCP connections from a local listener to a remote target.
 
 - **Utilities**
