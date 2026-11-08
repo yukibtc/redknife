@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 mod probe;
+mod rlimit;
 
 use self::probe::PortState;
 use super::resolve_host;
@@ -21,7 +22,7 @@ pub(super) const DEFAULT_TIMEOUT_MS: u64 = 1500;
 /// Default number of ports probed concurrently.
 const DEFAULT_CONCURRENCY: usize = 4500;
 
-/// File descriptors kept out of the scanning budget for the process itself.
+/// Port range covered by a scan.
 const PORTS: Range<u16> = 0..u16::MAX;
 
 pub(super) async fn run(
@@ -35,6 +36,7 @@ pub(super) async fn run(
     let timeout: Duration = Duration::from_millis(timeout.get());
 
     let concurrency: usize = concurrency.map_or(DEFAULT_CONCURRENCY, NonZeroUsize::get);
+    let concurrency: usize = rlimit::ensure_budget(concurrency);
 
     tracing::info!(
         "Scanning {ip} ({count} ports, concurrency: {concurrency}, timeout: {}ms)",
@@ -69,6 +71,7 @@ pub(super) async fn run(
             PortState::Open => tracing::info!("{port}/tcp open"),
             PortState::Closed => tracing::debug!("{port}/tcp closed"),
             PortState::Filtered => tracing::debug!("{port}/tcp filtered"),
+            PortState::Unknown => tracing::debug!("{port}/tcp unknown"),
         }
     }
 
@@ -81,12 +84,19 @@ pub(super) async fn run(
         .map(|(port, _)| *port)
         .collect();
     let closed: usize = results.values().filter(|state| state.is_closed()).count();
-    let filtered: usize = total - open.len() - closed;
+    let unknown: usize = results.values().filter(|state| state.is_unknown()).count();
+    let filtered: usize = total - open.len() - closed - unknown;
 
     eprintln!(
         "\nScanned {total} ports on {ip}: {} open, {closed} closed, {filtered} filtered.",
         open.len(),
     );
+
+    if unknown > 0 {
+        tracing::warn!(
+            "{unknown} ports could not be determined (local resources exhausted): raise `ulimit -n` or lower `--concurrency`"
+        );
+    }
 
     if open.is_empty() {
         eprintln!("No open ports found");
@@ -125,6 +135,20 @@ mod tests {
         let closed: SocketAddr = listener.local_addr().unwrap();
         drop(listener);
         let state = probe::probe(closed, Duration::from_secs(1)).await;
-        assert!(matches!(state, PortState::Closed | PortState::Filtered));
+        assert!(matches!(
+            state,
+            PortState::Closed | PortState::Filtered | PortState::Unknown
+        ));
+    }
+
+    #[tokio::test]
+    async fn probes_unroutable_address_as_filtered() {
+        // TEST-NET-1 (RFC 5737) is guaranteed not to be routed, so the
+        // probe times out instead of being refused.
+        let target: SocketAddr = "192.0.2.1:1".parse().unwrap();
+        assert_eq!(
+            probe::probe(target, Duration::from_millis(250)).await,
+            PortState::Filtered
+        );
     }
 }
