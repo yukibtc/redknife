@@ -31,6 +31,9 @@
   - **Neighbor Scanner**: Actively scan a subnet to discover hosts. (**NDP not available yet**)
   - **Neighbor Spoofing**: Poison neighbor caches. (**NDP not available yet**)
 
+- **Pivot**
+  - **Port Forward**: Forward TCP connections from a local listener to a remote target.
+
 - **Utilities**
   - **JWT**: JSON Web Token encoding, decoding and signing.
   - **PowerShell**: PowerShell `-EncodedCommand` strings (base64 of UTF-16LE) encoding and decoding.
