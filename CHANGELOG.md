@@ -46,6 +46,7 @@
 - Add `rk neigh scan`
 - Add `rk neigh spoof`
 - Add `rk port forward`
+- Add `rk port scan`
 - Add `rk util jwt decode` and `rk util jwt encode`
 - Add `rk util url decode` and `rk util url encode`
 - Add `rk util xor`

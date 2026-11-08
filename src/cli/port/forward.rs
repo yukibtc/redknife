@@ -1,8 +1,9 @@
 use std::net::SocketAddr;
 
 use tokio::net::{TcpListener, TcpStream};
-use tokio::{io, net, signal};
+use tokio::{io, signal};
 
+use super::resolve_target;
 use crate::logger;
 
 pub(super) async fn run(listen: SocketAddr, target: String) -> io::Result<()> {
@@ -26,16 +27,6 @@ pub(super) async fn run(listen: SocketAddr, target: String) -> io::Result<()> {
     tracing::info!("Forwarder stopped.");
 
     Ok(())
-}
-
-/// Resolve the target, which can be either a socket address or a hostname.
-async fn resolve_target(target: &str) -> io::Result<SocketAddr> {
-    net::lookup_host(target).await?.next().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("failed to resolve target address: {target}"),
-        )
-    })
 }
 
 /// Accept incoming connections and forward each one to the target.

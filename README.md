@@ -33,6 +33,7 @@
 
 - **Port**
   - **Port Forward**: Forward TCP connections from a local listener to a remote target.
+  - **Port Scanner**: Scan TCP ports on a target.
 
 - **Utilities**
   - **JWT**: JSON Web Token encoding, decoding and signing.
