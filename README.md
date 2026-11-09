@@ -35,6 +35,9 @@
   - **Port Forward**: Forward TCP connections from a local listener to a remote target.
   - **Port Scanner**: Scan TCP ports on a target.
 
+- **Process**
+  - **Process Monitor**: Monitor process creation without root permissions.
+
 - **Utilities**
   - **JWT**: JSON Web Token encoding, decoding and signing.
   - **PowerShell**: PowerShell `-EncodedCommand` strings (base64 of UTF-16LE) encoding and decoding.

@@ -13,6 +13,8 @@ mod ldap;
 mod logger;
 #[cfg(target_os = "linux")]
 mod net;
+#[cfg(target_os = "linux")]
+mod proc;
 
 use self::cli::Cli;
 

@@ -27,6 +27,12 @@
 
 -->
 
+## Unreleased
+
+### Added
+
+- Add `rk proc monitor`
+
 ## 0.4.1 - 2026/11/08
 
 ### Fixed

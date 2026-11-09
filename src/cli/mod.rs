@@ -11,6 +11,8 @@ mod ldap;
 #[cfg(target_os = "linux")]
 mod neigh;
 mod port;
+#[cfg(target_os = "linux")]
+mod proc;
 mod util;
 
 use self::dns::DnsCommand;
@@ -20,6 +22,8 @@ use self::ldap::LdapCommand;
 #[cfg(target_os = "linux")]
 use self::neigh::NeighCommand;
 use self::port::PortCommand;
+#[cfg(target_os = "linux")]
+use self::proc::ProcCommand;
 use self::util::UtilCommand;
 
 #[derive(Debug, Subcommand)]
@@ -61,6 +65,13 @@ enum Command {
         #[command(subcommand)]
         command: PortCommand,
     },
+    /// Process utilities
+    #[cfg(target_os = "linux")]
+    #[command(arg_required_else_help = true)]
+    Proc {
+        #[command(subcommand)]
+        command: ProcCommand,
+    },
     /// Utilities (JWT, XOR, PowerShell, URL, etc)
     #[command(arg_required_else_help = true)]
     Util {
@@ -87,6 +98,8 @@ impl Cli {
             #[cfg(target_os = "linux")]
             Command::Neigh { command } => command.run().await?,
             Command::Port { command } => command.run().await?,
+            #[cfg(target_os = "linux")]
+            Command::Proc { command } => command.run().await?,
             Command::Util { command } => command.run()?,
         }
 
