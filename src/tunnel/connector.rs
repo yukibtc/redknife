@@ -187,19 +187,32 @@ async fn worker(mut sender: SendRequest<Bytes>, token: Arc<str>) -> io::Result<(
             ));
         }
 
-        let target: HostAndPort = extract_hdr_target(response.headers())?;
-        let addr: SocketAddr = resolve_target(&target).await?;
+        let target: HostAndPort = match extract_hdr_target(response.headers()) {
+            Ok(target) => target,
+            Err(e) => {
+                tracing::warn!("{e}");
+                continue;
+            }
+        };
+
+        let addr: SocketAddr = match resolve_target(&target).await {
+            Ok(addr) => addr,
+            Err(e) => {
+                tracing::warn!("Cannot resolve {target}: {e}");
+                continue;
+            }
+        };
 
         match dial(addr).await {
             Ok(tcp) => {
                 // A stream-level failure (reset, cancellation, etc.) must not tear the session down.
-                if let Err(error) = bridge(response.into_body(), send, tcp).await {
-                    tracing::debug!("Stream to {target} closed: {error}");
+                if let Err(e) = bridge(response.into_body(), send, tcp).await {
+                    tracing::debug!("Stream to {target} closed: {e}");
                 }
             }
-            Err(error) => {
+            Err(e) => {
                 // The target is not reachable from this side
-                tracing::warn!("Cannot dial {target}: {error}");
+                tracing::warn!("Cannot dial {target}: {e}");
             }
         }
     }
