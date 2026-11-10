@@ -47,8 +47,9 @@ pub(super) async fn run(
     // SOCKS5 proxy, the destination is chosen by the connecting client.
     if !no_socks {
         let listener: SocksListener = SocksListener::bind(socks).await?;
+        let socks_addr: SocketAddr = listener.local_addr()?;
 
-        tracing::info!("SOCKS5 proxy on {socks}");
+        tracing::info!("SOCKS5 proxy on {socks_addr}");
 
         let pending_tx: mpsc::Sender<Waiting> = pending_tx.clone();
 
