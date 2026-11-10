@@ -38,6 +38,10 @@
 - **Process**
   - **Process Monitor**: Monitor process creation without root permissions.
 
+- **Tunnel**
+  - **Tunnel Listener**: Expose the target network to the operator with a SOCKS5 proxy and TCP port forwards.
+  - **Tunnel Connector**: Connect the target network back to the operator, with optional listeners for reverse connections.
+
 - **Utilities**
   - **JWT**: JSON Web Token encoding, decoding and signing.
   - **PowerShell**: PowerShell `-EncodedCommand` strings (base64 of UTF-16LE) encoding and decoding.

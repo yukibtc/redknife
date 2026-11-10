@@ -5,9 +5,11 @@ use clap::Parser;
 #[cfg(target_os = "linux")]
 mod arp;
 mod cli;
+mod dir;
 mod dns;
 mod ftp;
 mod hexdump;
+mod host_and_port;
 mod http;
 mod ldap;
 mod logger;
@@ -15,6 +17,8 @@ mod logger;
 mod net;
 #[cfg(target_os = "linux")]
 mod proc;
+mod socks;
+mod tunnel;
 
 use self::cli::Cli;
 

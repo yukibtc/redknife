@@ -32,6 +32,7 @@
 ### Added
 
 - Add `rk proc monitor`
+- Add `rk tunnel listen` and `rk tunnel connect`
 
 ## 0.4.1 - 2026/11/08
 

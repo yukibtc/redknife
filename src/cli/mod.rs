@@ -1,5 +1,6 @@
+use std::env::{self, VarError};
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, ErrorKind, Read};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -13,6 +14,7 @@ mod neigh;
 mod port;
 #[cfg(target_os = "linux")]
 mod proc;
+mod tunnel;
 mod util;
 
 use self::dns::DnsCommand;
@@ -24,6 +26,7 @@ use self::neigh::NeighCommand;
 use self::port::PortCommand;
 #[cfg(target_os = "linux")]
 use self::proc::ProcCommand;
+use self::tunnel::TunnelCommand;
 use self::util::UtilCommand;
 
 #[derive(Debug, Subcommand)]
@@ -72,6 +75,12 @@ enum Command {
         #[command(subcommand)]
         command: ProcCommand,
     },
+    /// Tunnel
+    #[command(arg_required_else_help = true)]
+    Tunnel {
+        #[command(subcommand)]
+        command: TunnelCommand,
+    },
     /// Utilities (JWT, XOR, PowerShell, URL, etc)
     #[command(arg_required_else_help = true)]
     Util {
@@ -100,11 +109,23 @@ impl Cli {
             Command::Port { command } => command.run().await?,
             #[cfg(target_os = "linux")]
             Command::Proc { command } => command.run().await?,
+            Command::Tunnel { command } => command.run().await?,
             Command::Util { command } => command.run()?,
         }
 
         Ok(())
     }
+}
+
+#[inline]
+fn redknife_home_dir() -> io::Result<PathBuf> {
+    let home: PathBuf = match env::var("REDKNIFE_HOME") {
+        Ok(home) => PathBuf::from(home),
+        Err(VarError::NotPresent) => dirs::home_dir()
+            .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "home directory not found"))?,
+        Err(e) => return Err(io::Error::new(ErrorKind::InvalidInput, e)),
+    };
+    Ok(home.join(".redknife"))
 }
 
 fn str_from_arg_or_stdin(arg: String) -> io::Result<String> {

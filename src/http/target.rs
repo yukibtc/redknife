@@ -5,6 +5,8 @@ use http::Uri;
 use http::uri::{Authority, InvalidUri};
 use thiserror::Error;
 
+use crate::host_and_port::HostAndPort;
+
 #[derive(Debug, Error)]
 pub enum HttpTargetError {
     #[error(transparent)]
@@ -17,8 +19,7 @@ pub enum HttpTargetError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpTarget {
-    host: String,
-    port: u16,
+    host_and_port: HostAndPort,
     tls: bool,
 }
 
@@ -42,31 +43,25 @@ impl HttpTarget {
         // Removes IPv6 brackets, if any.
         // Functions like `("[::1]", 8000).to_socket_addrs()` returns an error if brackets are present.
         let host: &str = authority.host().trim_matches(['[', ']']);
+        let port: u16 = authority.port_u16().unwrap_or(if tls { 443 } else { 80 });
+        let host_and_port: HostAndPort = HostAndPort::new(host, port);
 
-        Ok(Self {
-            host: host.to_owned(),
-            port: authority.port_u16().unwrap_or(if tls { 443 } else { 80 }),
-            tls,
-        })
+        Ok(Self { host_and_port, tls })
     }
 
     #[inline]
     pub(super) fn host(&self) -> &str {
-        &self.host
+        self.host_and_port.host()
     }
 
     #[inline]
     pub(super) fn port(&self) -> u16 {
-        self.port
+        self.host_and_port.port()
     }
 
     #[inline]
     pub(crate) fn host_and_port(&self) -> String {
-        if self.host.contains(":") {
-            format!("[{}]:{}", self.host, self.port)
-        } else {
-            format!("{}:{}", self.host, self.port)
-        }
+        self.host_and_port.to_string()
     }
 
     #[inline]
