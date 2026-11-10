@@ -191,7 +191,12 @@ async fn worker(mut sender: SendRequest<Bytes>, token: Arc<str>) -> io::Result<(
         let addr: SocketAddr = resolve_target(&target).await?;
 
         match dial(addr).await {
-            Ok(tcp) => bridge(response.into_body(), send, tcp).await?,
+            Ok(tcp) => {
+                // A stream-level failure (reset, cancellation, etc.) must not tear the session down.
+                if let Err(error) = bridge(response.into_body(), send, tcp).await {
+                    tracing::debug!("Stream to {target} closed: {error}");
+                }
+            }
             Err(error) => {
                 // The target is not reachable from this side
                 tracing::warn!("Cannot dial {target}: {error}");
