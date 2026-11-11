@@ -133,7 +133,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::io::ErrorKind;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::time::Duration;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -198,7 +198,9 @@ mod tests {
 
     async fn connect_when_listening(addr: SocketAddr) -> TcpStream {
         for _ in 0..40 {
-            if let Ok(stream) = TcpStream::connect(addr).await {
+            if let Ok(Ok(stream)) =
+                time::timeout(Duration::from_secs(1), TcpStream::connect(addr)).await
+            {
                 return stream;
             }
             time::sleep(Duration::from_millis(50)).await;
@@ -306,7 +308,7 @@ mod tests {
         let dialed: SocketAddr = spawn_echo().await;
 
         let local_listen: Vec<SocketAddr> = vec![SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
             dialed.port(),
         )];
         let callback_addr: SocketAddr = local_listen[0];
@@ -317,8 +319,11 @@ mod tests {
 
         let mut callback: TcpStream = connect_when_listening(callback_addr).await;
         callback.write_all(b"hello").await.unwrap();
+
         let mut buffer: [u8; 5] = [0; 5];
-        callback.read_exact(&mut buffer).await.unwrap();
+        let echoed = time::timeout(Duration::from_secs(5), callback.read_exact(&mut buffer)).await;
+        assert!(echoed.is_ok(), "the tunnel never echoed back");
+        echoed.unwrap().unwrap();
         assert_eq!(&buffer, b"hello");
     }
 
@@ -329,10 +334,8 @@ mod tests {
         let (_pending_tx, endpoint): (mpsc::Sender<Waiting>, SocketAddr) =
             spawn_operator(&certs, []).await;
 
-        let local_listen: Vec<SocketAddr> = vec![SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
-            4444,
-        )];
+        let local_listen: Vec<SocketAddr> =
+            vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4444)];
         let callback_addr: SocketAddr = local_listen[0];
         spawn_target(&endpoint, TOKEN, Some(*certs.fingerprint()), local_listen);
 
