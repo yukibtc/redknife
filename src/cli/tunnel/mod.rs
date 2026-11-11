@@ -99,6 +99,9 @@ pub(super) enum TunnelCommand {
         /// Skip TLS certificate verification (insecure)
         #[arg(long, conflicts_with = "fingerprint")]
         tls_skip_verify: bool,
+        /// Number of dial workers
+        #[arg(long, default_value_t = 50)]
+        dial_workers: usize,
         /// Expose a local listener whose connections are delivered to the
         /// operator's loopback, on the same port (repeatable)
         ///
@@ -140,8 +143,9 @@ impl TunnelCommand {
                 auth,
                 fingerprint,
                 tls_skip_verify: _,
+                dial_workers,
                 local_listen,
-            } => connect::run(peer, auth, fingerprint, local_listen).await,
+            } => connect::run(peer, auth, fingerprint, dial_workers, local_listen).await,
         }
     }
 }

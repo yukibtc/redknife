@@ -191,6 +191,7 @@ mod tests {
             (*endpoint).into(),
             token.to_owned(),
             fingerprint,
+            50,
             local_listen,
         );
         tokio::spawn(connector.run());
@@ -256,6 +257,7 @@ mod tests {
             endpoint.into(),
             "wrong".to_owned(),
             Some(*certs.fingerprint()),
+            50,
             vec![],
         );
 

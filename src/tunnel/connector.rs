@@ -21,12 +21,11 @@ use super::{
 };
 use crate::host_and_port::HostAndPort;
 
-const POOL_SIZE: usize = 50;
-
 pub struct TunnelConnector {
     peer: HostAndPort,
     token: Arc<str>,
     fingerprint: Option<TunnelTlsFingerprint>,
+    dial_workers: usize,
     local_listen: Vec<SocketAddr>,
 }
 
@@ -36,12 +35,14 @@ impl TunnelConnector {
         peer: HostAndPort,
         token: String,
         fingerprint: Option<TunnelTlsFingerprint>,
+        dial_workers: usize,
         local_listen: Vec<SocketAddr>,
     ) -> Self {
         Self {
             peer,
             token: token.into(),
             fingerprint,
+            dial_workers,
             local_listen,
         }
     }
@@ -55,6 +56,7 @@ impl TunnelConnector {
                 &self.peer,
                 &self.token,
                 self.fingerprint,
+                self.dial_workers,
                 &self.local_listen,
             )
             .await;
@@ -79,6 +81,7 @@ async fn session(
     peer: &HostAndPort,
     token: &Arc<str>,
     fingerprint: Option<TunnelTlsFingerprint>,
+    dial_workers: usize,
     local_listen: &[SocketAddr],
 ) -> io::Result<()> {
     let sender: SendRequest<Bytes> = connect(peer, fingerprint).await?;
@@ -87,7 +90,7 @@ async fn session(
 
     let mut tasks: JoinSet<io::Result<()>> = JoinSet::new();
 
-    for _ in 0..POOL_SIZE {
+    for _ in 0..dial_workers {
         let sender: SendRequest<Bytes> = sender.clone();
         let token: Arc<str> = token.clone();
         tasks.spawn(worker(sender, token));
