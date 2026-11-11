@@ -169,7 +169,7 @@ mod tests {
         let tunnel: TunnelListener = TunnelListener::new(
             Bytes::from_static(TOKEN.as_bytes()),
             certs,
-            reverse_ports,
+            reverse_ports.into_iter().collect(),
             pending_rx,
         )
         .unwrap();

@@ -41,20 +41,17 @@ pub struct TunnelListener {
 
 impl TunnelListener {
     #[inline]
-    pub fn new<I>(
+    pub fn new(
         token: Bytes,
         certs: &TunnelTlsCerts,
-        reverse_ports_whitelist: I,
+        reverse_ports_whitelist: HashSet<u16>,
         pending: mpsc::Receiver<Waiting>,
-    ) -> io::Result<Self>
-    where
-        I: IntoIterator<Item = u16>,
-    {
+    ) -> io::Result<Self> {
         Ok(Self {
             acceptor: certs.acceptor()?,
             token,
             pending: Arc::new(Mutex::new(pending)),
-            reverse_ports_whitelist: Arc::new(reverse_ports_whitelist.into_iter().collect()),
+            reverse_ports_whitelist: Arc::new(reverse_ports_whitelist),
         })
     }
 

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -27,7 +28,7 @@ pub(super) async fn run(
     socks: SocketAddr,
     no_socks: bool,
     forwards: Vec<Forward>,
-    reverse_ports_whitelist: Vec<u16>,
+    reverse_ports_whitelist: HashSet<u16>,
     data_dir: Option<PathBuf>,
 ) -> io::Result<()> {
     logger::init()?;
