@@ -1,4 +1,4 @@
-//! Minimal SOCKS5 server (RFC 1928)
+//! Minimal SOCKS5 client and server (RFC 1928)
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -166,6 +166,115 @@ async fn reply_method(stream: &mut TcpStream, method: u8) -> io::Result<()> {
     stream.write_all(&[VERSION, method]).await
 }
 
+/// Connect to `target` through a SOCKS5 proxy (CONNECT, no authentication).
+pub async fn connect(proxy: SocketAddr, target: &HostAndPort) -> io::Result<TcpStream> {
+    let mut stream: TcpStream = time::timeout(HANDSHAKE_TIMEOUT, TcpStream::connect(proxy))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SOCKS proxy connect timed out"))??;
+
+    match time::timeout(HANDSHAKE_TIMEOUT, connect_handshake(&mut stream, target)).await {
+        Ok(result) => result.map(|()| stream),
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "SOCKS handshake timed out",
+        )),
+    }
+}
+
+// Run the client side of the SOCKS5 CONNECT handshake.
+async fn connect_handshake(stream: &mut TcpStream, target: &HostAndPort) -> io::Result<()> {
+    // Greeting: offer the no-auth method only.
+    stream.write_all(&[VERSION, 0x01, METHOD_NO_AUTH]).await?;
+
+    let mut method: [u8; 2] = [0; 2];
+    stream.read_exact(&mut method).await?;
+
+    if method[0] != VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported SOCKS version {}", method[0]),
+        ));
+    }
+
+    if method[1] != METHOD_NO_AUTH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the proxy selected an unsupported auth method",
+        ));
+    }
+
+    // Request: CONNECT, with the target encoded per its address type.
+    let mut request: Vec<u8> = vec![VERSION, CMD_CONNECT, 0x00];
+
+    match target.host().parse::<Ipv4Addr>() {
+        Ok(ip) => {
+            request.push(ATYP_IPV4);
+            request.extend_from_slice(&ip.octets());
+        }
+        Err(_) => match target.host().parse::<Ipv6Addr>() {
+            Ok(ip) => {
+                request.push(ATYP_IPV6);
+                request.extend_from_slice(&ip.octets());
+            }
+            Err(_) => {
+                request.push(ATYP_DOMAIN);
+                request.push(u8::try_from(target.host().len()).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "target hostname too long")
+                })?);
+                request.extend_from_slice(target.host().as_bytes());
+            }
+        },
+    }
+    request.extend_from_slice(&target.port().to_be_bytes());
+
+    stream.write_all(&request).await?;
+
+    // Reply: version, code, reserved, bound address type and bound address.
+    let mut reply: [u8; 4] = [0; 4];
+    stream.read_exact(&mut reply).await?;
+
+    if reply[0] != VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported SOCKS version {}", reply[0]),
+        ));
+    }
+
+    if reply[1] != CODE_SUCCESS {
+        return Err(io::Error::other(format!(
+            "SOCKS proxy refused CONNECT ({:#04x})",
+            reply[1]
+        )));
+    }
+
+    // Consume the bound address, whose encoding depends on the address type.
+    match reply[3] {
+        ATYP_IPV4 => {
+            let mut bound: [u8; 6] = [0; 6];
+            stream.read_exact(&mut bound).await?;
+        }
+        ATYP_DOMAIN => {
+            let mut length: [u8; 1] = [0; 1];
+            stream.read_exact(&mut length).await?;
+
+            let mut bound: Vec<u8> = vec![0; usize::from(length[0]) + 2];
+            stream.read_exact(&mut bound).await?;
+        }
+        ATYP_IPV6 => {
+            let mut bound: [u8; 18] = [0; 18];
+            stream.read_exact(&mut bound).await?;
+        }
+        other => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported reply address type {other}"),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +307,46 @@ mod tests {
             connect_reply,
             [0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         );
+    }
+
+    #[tokio::test]
+    async fn connect_relays_through_a_socks_listener() {
+        // The origin server ultimately reached through the proxy.
+        let origin: TcpListener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin_addr: SocketAddr = origin.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (socket, _) = origin.accept().await.unwrap();
+            let (mut read, mut write) = socket.into_split();
+            let _ = tokio::io::copy(&mut read, &mut write).await;
+        });
+
+        // The SOCKS listener plays the proxy: accepted connections are relayed
+        // to the origin.
+        let listener: SocksListener = SocksListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy: SocketAddr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, target) = listener.accept().await.unwrap();
+            assert_eq!(target, HostAndPort::from(origin_addr));
+
+            let mut upstream: TcpStream = TcpStream::connect((target.host(), target.port()))
+                .await
+                .unwrap();
+            let mut stream = stream;
+            let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
+        });
+
+        let mut client: TcpStream = super::connect(proxy, &HostAndPort::from(origin_addr))
+            .await
+            .unwrap();
+
+        client.write_all(b"ping").await.unwrap();
+        let mut buffer: [u8; 4] = [0; 4];
+        client.read_exact(&mut buffer).await.unwrap();
+        assert_eq!(&buffer, b"ping");
+
+        client.write_all(b"pongpong").await.unwrap();
+        let mut buffer: [u8; 8] = [0; 8];
+        client.read_exact(&mut buffer).await.unwrap();
+        assert_eq!(&buffer, b"pongpong");
     }
 }

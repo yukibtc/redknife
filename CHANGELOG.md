@@ -33,6 +33,7 @@
 
 - Add `rk proc monitor`
 - Add `rk tunnel listen` and `rk tunnel connect`
+- Add `--socks` flag on `rk port forward`
 
 ## 0.4.1 - 2026/11/08
 

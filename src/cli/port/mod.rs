@@ -9,6 +9,7 @@ mod forward;
 mod scan;
 
 use self::scan::DEFAULT_TIMEOUT_MS;
+use crate::host_and_port::HostAndPort;
 
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum PortCommand {
@@ -17,8 +18,14 @@ pub(in crate::cli) enum PortCommand {
     Forward {
         /// Address to listen on (<ip>:<port>, e.g. 0.0.0.0:33060)
         listen: SocketAddr,
-        /// Target to forward connections to (<host>:<port>, e.g. 172.16.0.10:3306)
-        target: String,
+        /// Target to forward connections to (<host>:<port>, e.g. 172.16.0.10:3306).
+        ///
+        /// With --socks the hostname is passed to the proxy and resolved there,
+        /// so names only reachable from the proxy's network work.
+        target: HostAndPort,
+        /// Relay connections through a SOCKS5 proxy (<ip>:<port>, no auth)
+        #[arg(long)]
+        socks: Option<SocketAddr>,
     },
     /// Scan TCP ports on a target
     #[command(arg_required_else_help = true)]
@@ -37,7 +44,11 @@ pub(in crate::cli) enum PortCommand {
 impl PortCommand {
     pub(in crate::cli) async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            Self::Forward { listen, target } => forward::run(listen, target).await?,
+            Self::Forward {
+                listen,
+                target,
+                socks,
+            } => forward::run(listen, target, socks).await?,
             Self::Scan {
                 target,
                 timeout,
@@ -47,17 +58,6 @@ impl PortCommand {
 
         Ok(())
     }
-}
-
-/// Resolve a target, which can be either a socket address or a hostname.
-#[inline]
-async fn resolve_target(target: &str) -> io::Result<SocketAddr> {
-    lookup_host(target).await?.next().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("failed to resolve target address: {target}"),
-        )
-    })
 }
 
 /// Resolve a bare host (IP address or hostname) into an IP address.
