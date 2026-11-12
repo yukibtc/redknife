@@ -14,7 +14,7 @@ mod rules;
 
 pub(super) use self::format::HttpProxyFormat;
 use self::middleware::{HttpProxyServerMiddleware, MiddlewareEvent};
-use self::rules::loader::RulesLoader;
+use crate::config_loader::ConfigLoader;
 use crate::http::proxy::HttpProxyService;
 use crate::http::server::{HttpServer, HttpServerHandler};
 
@@ -35,7 +35,7 @@ pub(super) async fn run(
 ) -> io::Result<()> {
     let addr: SocketAddr = SocketAddr::new(ip, port);
 
-    let (mut reloader, rules) = RulesLoader::new(rules, watch_rules).await?;
+    let (mut reloader, rules) = ConfigLoader::new(rules, watch_rules).await?;
 
     let listener: TcpListener = TcpListener::bind(addr).await?;
 

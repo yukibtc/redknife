@@ -5,6 +5,7 @@ use clap::Parser;
 #[cfg(target_os = "linux")]
 mod arp;
 mod cli;
+mod config_loader;
 mod dir;
 mod dns;
 mod ftp;

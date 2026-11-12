@@ -6,7 +6,6 @@ use serde::Deserialize;
 use crate::http::request;
 
 mod deser_util;
-pub(super) mod loader;
 
 use self::deser_util::{
     deserialize_base64, deserialize_header_names, deserialize_optional_authority,

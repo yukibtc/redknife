@@ -4,39 +4,39 @@ use std::time::Duration;
 use std::{future, io};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use serde::de::DeserializeOwned;
 use tokio::fs;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 use tokio::time::{self, Instant};
 
-use super::Rules;
-
 const RELOAD_DELAY: Duration = Duration::from_millis(200);
 
-struct RulesWatcher {
+struct ConfigWatcher<T> {
     // Keep the watcher alive for the entire reload loop.
     _watcher: RecommendedWatcher,
     path: PathBuf,
     content: String,
     events: mpsc::UnboundedReceiver<notify::Result<Event>>,
-    rules: watch::Sender<Arc<Rules>>,
+    config: watch::Sender<Arc<T>>,
 }
 
-impl RulesWatcher {
-    async fn new(path: PathBuf) -> io::Result<(Self, watch::Receiver<Arc<Rules>>)> {
+impl<T> ConfigWatcher<T>
+where
+    T: DeserializeOwned,
+{
+    async fn new(path: PathBuf) -> io::Result<(Self, watch::Receiver<Arc<T>>)> {
         let path: PathBuf = path::absolute(path)?;
 
         let parent: PathBuf = fs::canonicalize(path.parent().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Rules file has no parent directory",
-            )
+            io::Error::new(io::ErrorKind::InvalidInput, "file has no parent directory")
         })?)
         .await?;
 
-        let path: PathBuf = parent.join(path.file_name().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "Rules path has no file name")
-        })?);
+        let path: PathBuf =
+            parent.join(path.file_name().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "path has no file name")
+            })?);
 
         let (sender, events) = mpsc::unbounded_channel();
 
@@ -52,10 +52,10 @@ impl RulesWatcher {
             .map_err(io::Error::other)?;
 
         let content: String = fs::read_to_string(&path).await?;
-        let initial: Rules = toml::from_str(&content)
+        let initial: T = toml::from_str(&content)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
-        let (rules, receiver) = watch::channel(Arc::new(initial));
+        let (config, receiver) = watch::channel(Arc::new(initial));
 
         Ok((
             Self {
@@ -63,14 +63,14 @@ impl RulesWatcher {
                 path,
                 content,
                 events,
-                rules,
+                config,
             },
             receiver,
         ))
     }
 
     #[inline]
-    fn affects_rules(&self, event: &Event) -> bool {
+    fn affects_config(&self, event: &Event) -> bool {
         !event.kind.is_access()
             && (event.need_rescan() || event.paths.iter().any(|path| path == &self.path))
     }
@@ -84,11 +84,11 @@ impl RulesWatcher {
         W: AsyncWrite + Unpin,
     {
         match event {
-            Ok(event) => Ok(self.affects_rules(&event)),
+            Ok(event) => Ok(self.affects_config(&event)),
             Err(err) => {
                 stderr
                     .write_all(
-                        format!("Rules watcher error for {}: {err}\n", self.path.display())
+                        format!("Config watcher error for {}: {err}\n", self.path.display())
                             .as_bytes(),
                     )
                     .await?;
@@ -106,10 +106,10 @@ impl RulesWatcher {
             return Ok(false);
         }
 
-        let rules: Rules = toml::from_str(&content)
+        let config: T = toml::from_str(&content)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
-        self.rules.send_replace(Arc::new(rules));
+        self.config.send_replace(Arc::new(config));
 
         self.content = content;
 
@@ -122,7 +122,7 @@ impl RulesWatcher {
     {
         loop {
             let event = self.events.recv().await.ok_or_else(|| {
-                io::Error::new(io::ErrorKind::BrokenPipe, "Rules watcher stopped")
+                io::Error::new(io::ErrorKind::BrokenPipe, "Config watcher stopped")
             })?;
 
             if !self.should_reload(event, stderr).await? {
@@ -137,7 +137,7 @@ impl RulesWatcher {
                     _ = &mut delay => break,
                     event = self.events.recv() => {
                         let event = event.ok_or_else(|| {
-                            io::Error::new(io::ErrorKind::BrokenPipe, "Rules watcher stopped")
+                            io::Error::new(io::ErrorKind::BrokenPipe, "Config watcher stopped")
                         })?;
                         if self.should_reload(event, stderr).await? {
                             delay.as_mut().reset(Instant::now() + RELOAD_DELAY);
@@ -147,10 +147,10 @@ impl RulesWatcher {
             }
 
             let message: String = match self.reload().await {
-                Ok(true) => format!("Rules reloaded from {}\n", self.path.display()),
+                Ok(true) => format!("Config reloaded from {}\n", self.path.display()),
                 Ok(false) => continue,
                 Err(err) => format!(
-                    "Cannot reload rules from {}: {err}; keeping previous rules\n",
+                    "Cannot reload config from {}: {err}; keeping previous config\n",
                     self.path.display(),
                 ),
             };
@@ -161,26 +161,32 @@ impl RulesWatcher {
     }
 }
 
-enum Inner {
-    Watching(RulesWatcher),
+enum Inner<T> {
+    Watching(ConfigWatcher<T>),
     NotWatching,
 }
 
-impl Inner {
+impl<T> Inner<T>
+where
+    T: Default + DeserializeOwned,
+{
     #[inline]
-    async fn watching(path: PathBuf) -> io::Result<(Self, watch::Receiver<Arc<Rules>>)> {
-        let (inner, rx) = RulesWatcher::new(path).await?;
+    async fn watching(path: PathBuf) -> io::Result<(Self, watch::Receiver<Arc<T>>)> {
+        let (inner, rx) = ConfigWatcher::new(path).await?;
         Ok((Self::Watching(inner), rx))
     }
 }
 
-pub(in super::super) struct RulesLoader(Inner);
+pub struct ConfigLoader<T>(Inner<T>);
 
-impl RulesLoader {
-    pub(in super::super) async fn new(
+impl<T> ConfigLoader<T>
+where
+    T: Default + DeserializeOwned,
+{
+    pub async fn new(
         path: Option<PathBuf>,
         watch_rules: bool,
-    ) -> io::Result<(Self, watch::Receiver<Arc<Rules>>)> {
+    ) -> io::Result<(Self, watch::Receiver<Arc<T>>)> {
         match path {
             Some(path) if watch_rules => {
                 let (inner, rx) = Inner::watching(path).await?;
@@ -188,19 +194,19 @@ impl RulesLoader {
             }
             Some(path) => {
                 let content: String = fs::read_to_string(path).await?;
-                let rules: Rules = toml::from_str(&content)
+                let rules: T = toml::from_str(&content)
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                 let (_, rx) = watch::channel(Arc::new(rules));
                 Ok((Self(Inner::NotWatching), rx))
             }
             None => {
-                let (_, rx) = watch::channel(Arc::new(Rules::default()));
+                let (_, rx) = watch::channel(Arc::new(T::default()));
                 Ok((Self(Inner::NotWatching), rx))
             }
         }
     }
 
-    pub(in super::super) async fn run<W>(&mut self, stderr: &mut W) -> io::Result<()>
+    pub async fn run<W>(&mut self, stderr: &mut W) -> io::Result<()>
     where
         W: AsyncWrite + Unpin,
     {
@@ -214,35 +220,39 @@ impl RulesLoader {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use futures_util::FutureExt;
-    use http::{Request, StatusCode, Uri};
     use notify::EventKind;
     use notify::event::{AccessKind, ModifyKind};
+    use serde::Deserialize;
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     use super::*;
-    use crate::cli::http::proxy::rules::RuleOutcome;
 
     const INITIAL: &str = r#"
 [[rules]]
 name = "initial"
-match = {}
-deny = { code = 403 }
 "#;
 
     const UPDATED: &str = r#"
 [[rules]]
 name = "updated"
-match = {}
-deny = { code = 429 }
 "#;
+
+    #[derive(Debug, Default, Deserialize)]
+    struct Rules {
+        rules: Vec<Rule>,
+    }
+
+    #[derive(Debug, PartialEq, Eq, Deserialize)]
+    struct Rule {
+        name: String,
+    }
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
     #[tokio::test]
     async fn loader_without_rules() {
-        let (mut loader, receiver) = RulesLoader::new(None, false).await.unwrap();
+        let (mut loader, receiver) = ConfigLoader::<Rules>::new(None, false).await.unwrap();
 
         assert!(matches!(&loader.0, Inner::NotWatching));
         assert!(receiver.borrow().rules.is_empty());
@@ -260,7 +270,9 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (mut loader, receiver) = RulesLoader::new(Some(path.clone()), false).await.unwrap();
+        let (mut loader, receiver) = ConfigLoader::<Rules>::new(Some(path.clone()), false)
+            .await
+            .unwrap();
 
         assert!(matches!(&loader.0, Inner::NotWatching));
         assert_eq!(receiver.borrow().rules[0].name, "initial");
@@ -284,7 +296,7 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (loader, receiver) = RulesLoader::new(Some(path), true).await.unwrap();
+        let (loader, receiver) = ConfigLoader::<Rules>::new(Some(path), true).await.unwrap();
 
         assert!(matches!(&loader.0, Inner::Watching(_)));
         assert_eq!(receiver.borrow().rules[0].name, "initial");
@@ -297,18 +309,34 @@ deny = { code = 429 }
         let path = dir.path().join("rules.toml");
 
         // A missing file fails in both loading modes
-        assert!(RulesLoader::new(Some(path.clone()), false).await.is_err());
-        assert!(RulesLoader::new(Some(path.clone()), true).await.is_err());
+        assert!(
+            ConfigLoader::<Rules>::new(Some(path.clone()), false)
+                .await
+                .is_err()
+        );
+        assert!(
+            ConfigLoader::<Rules>::new(Some(path.clone()), true)
+                .await
+                .is_err()
+        );
 
         // Invalid TOML also fails without watching
         fs::write(&path, "[[rules").await.unwrap();
-        assert!(RulesLoader::new(Some(path.clone()), false).await.is_err());
-        assert!(RulesLoader::new(Some(path), true).await.is_err());
+        assert!(
+            ConfigLoader::<Rules>::new(Some(path.clone()), false)
+                .await
+                .is_err()
+        );
+        assert!(ConfigLoader::<Rules>::new(Some(path), true).await.is_err());
 
         // The parent directory must exist
         let path = dir.path().join("missing").join("rules.toml");
-        assert!(RulesLoader::new(Some(path.clone()), false).await.is_err());
-        assert!(RulesLoader::new(Some(path), true).await.is_err());
+        assert!(
+            ConfigLoader::<Rules>::new(Some(path.clone()), false)
+                .await
+                .is_err()
+        );
+        assert!(ConfigLoader::<Rules>::new(Some(path), true).await.is_err());
     }
 
     #[tokio::test]
@@ -318,23 +346,23 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (loader, _) = RulesLoader::new(Some(path), true).await.unwrap();
+        let (loader, _) = ConfigLoader::<Rules>::new(Some(path), true).await.unwrap();
         let Inner::Watching(watcher) = loader.0 else {
             panic!("Expected a rules watcher");
         };
 
         // Accept modifications to the rules file
         let event = Event::new(EventKind::Modify(ModifyKind::Any)).add_path(watcher.path.clone());
-        assert!(watcher.affects_rules(&event));
+        assert!(watcher.affects_config(&event));
 
         // Ignore other files in the same directory
         let event =
             Event::new(EventKind::Modify(ModifyKind::Any)).add_path(dir.path().join("other.toml"));
-        assert!(!watcher.affects_rules(&event));
+        assert!(!watcher.affects_config(&event));
 
         // Reading the file must not trigger another reload
         let event = Event::new(EventKind::Access(AccessKind::Any)).add_path(watcher.path.clone());
-        assert!(!watcher.affects_rules(&event));
+        assert!(!watcher.affects_config(&event));
     }
 
     #[tokio::test]
@@ -344,13 +372,13 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (loader, receiver) = RulesLoader::new(Some(path.clone()), true).await.unwrap();
+        let (loader, receiver) = ConfigLoader::<Rules>::new(Some(path.clone()), true)
+            .await
+            .unwrap();
         let Inner::Watching(mut watcher) = loader.0 else {
             panic!("Expected a rules watcher");
         };
         let original = Arc::clone(&receiver.borrow());
-        let uri = Uri::from_static("http://example.com/test");
-        let mut request = Request::builder().uri("/test").body(Bytes::new()).unwrap();
 
         // Publish new rules without changing existing snapshots
         fs::write(&path, UPDATED).await.unwrap();
@@ -360,18 +388,13 @@ deny = { code = 429 }
         let updated = Arc::clone(&receiver.borrow());
 
         assert!(!Arc::ptr_eq(&original, &updated));
-        assert!(matches!(
-            original.apply(&uri, &mut request).outcome,
-            RuleOutcome::Deny(StatusCode::FORBIDDEN)
-        ));
 
-        let report = updated.apply(&uri, &mut request);
-
-        assert!(matches!(
-            report.outcome,
-            RuleOutcome::Deny(StatusCode::TOO_MANY_REQUESTS)
-        ));
-        assert_eq!(report.matched_rules, vec!["updated"]);
+        assert_eq!(
+            updated.rules,
+            vec![Rule {
+                name: String::from("updated")
+            }]
+        );
     }
 
     #[tokio::test]
@@ -381,7 +404,9 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (loader, receiver) = RulesLoader::new(Some(path.clone()), true).await.unwrap();
+        let (loader, receiver) = ConfigLoader::<Rules>::new(Some(path.clone()), true)
+            .await
+            .unwrap();
         let Inner::Watching(mut watcher) = loader.0 else {
             panic!("Expected a rules watcher");
         };
@@ -412,7 +437,9 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (loader, receiver) = RulesLoader::new(Some(path.clone()), true).await.unwrap();
+        let (loader, receiver) = ConfigLoader::<Rules>::new(Some(path.clone()), true)
+            .await
+            .unwrap();
         let Inner::Watching(mut watcher) = loader.0 else {
             panic!("Expected a rules watcher");
         };
@@ -435,7 +462,9 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (mut loader, mut receiver) = RulesLoader::new(Some(path.clone()), true).await.unwrap();
+        let (mut loader, mut receiver) = ConfigLoader::<Rules>::new(Some(path.clone()), true)
+            .await
+            .unwrap();
         let mut stderr = Vec::new();
 
         let checks = async {
@@ -459,7 +488,9 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (mut loader, mut receiver) = RulesLoader::new(Some(path.clone()), true).await.unwrap();
+        let (mut loader, mut receiver) = ConfigLoader::<Rules>::new(Some(path.clone()), true)
+            .await
+            .unwrap();
         let mut stderr = Vec::new();
 
         let checks = async {
@@ -493,7 +524,9 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (mut loader, mut receiver) = RulesLoader::new(Some(path.clone()), true).await.unwrap();
+        let (mut loader, mut receiver) = ConfigLoader::<Rules>::new(Some(path.clone()), true)
+            .await
+            .unwrap();
         let (mut stderr, output) = tokio::io::duplex(4096);
         let mut lines = BufReader::new(output).lines();
 
@@ -503,7 +536,7 @@ deny = { code = 429 }
 
             loop {
                 let message = lines.next_line().await.unwrap().unwrap();
-                if message.contains("keeping previous rules") {
+                if message.contains("keeping previous config") {
                     break;
                 }
             }
@@ -516,7 +549,7 @@ deny = { code = 429 }
             receiver.changed().await.unwrap();
             assert_eq!(receiver.borrow().rules[0].name, "updated");
             let message = lines.next_line().await.unwrap().unwrap();
-            assert!(message.contains("Rules reloaded"));
+            assert!(message.contains("Config reloaded"));
         };
 
         tokio::select! {
@@ -532,7 +565,9 @@ deny = { code = 429 }
 
         fs::write(&path, INITIAL).await.unwrap();
 
-        let (mut loader, mut receiver) = RulesLoader::new(Some(path.clone()), true).await.unwrap();
+        let (mut loader, mut receiver) = ConfigLoader::<Rules>::new(Some(path.clone()), true)
+            .await
+            .unwrap();
         let (mut stderr, output) = tokio::io::duplex(4096);
         let mut lines = BufReader::new(output).lines();
 
@@ -540,7 +575,7 @@ deny = { code = 429 }
             // Keep the active rules while the file is absent
             fs::remove_file(&path).await.unwrap();
             let message = lines.next_line().await.unwrap().unwrap();
-            assert!(message.contains("keeping previous rules"));
+            assert!(message.contains("keeping previous config"));
             assert!(!receiver.has_changed().unwrap());
             assert_eq!(receiver.borrow().rules[0].name, "initial");
 
@@ -549,7 +584,7 @@ deny = { code = 429 }
             receiver.changed().await.unwrap();
             assert_eq!(receiver.borrow().rules[0].name, "updated");
             let message = lines.next_line().await.unwrap().unwrap();
-            assert!(message.contains("Rules reloaded"));
+            assert!(message.contains("Config reloaded"));
         };
 
         tokio::select! {
