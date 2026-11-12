@@ -1,6 +1,7 @@
 use std::future::poll_fn;
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -36,12 +37,15 @@ fn h2_to_io_err(error: h2::Error) -> io::Error {
     io::Error::new(ErrorKind::ConnectionReset, error)
 }
 
-fn extract_hdr_target(headers: &HeaderMap) -> io::Result<HostAndPort> {
+fn extract_hdr<T>(headers: &HeaderMap, name: &str) -> io::Result<T>
+where
+    T: FromStr,
+{
     headers
-        .get(HDR_TARGET)
+        .get(name)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse().ok())
-        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "missing or invalid target header"))
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "missing or invalid header"))
 }
 
 // Bridge a dialed TCP connection with an HTTP/2 stream.

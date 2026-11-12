@@ -18,7 +18,7 @@ use tokio_rustls::server::TlsStream;
 use super::tls::TunnelTlsCerts;
 use super::{
     ALPN, DIAL_PATH, DIAL_TIMEOUT, HDR_AUTHORIZATION, HDR_PORT, HDR_TARGET, OPDIAL_PATH, bridge,
-    dial, h2_to_io_err,
+    dial, extract_hdr, h2_to_io_err,
 };
 use crate::host_and_port::HostAndPort;
 
@@ -174,14 +174,7 @@ async fn handle_opdial(
     mut respond: SendResponse<Bytes>,
     reverse_ports_whitelist: Arc<HashSet<u16>>,
 ) -> io::Result<()> {
-    let port: u16 = request
-        .headers()
-        .get(HDR_PORT)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse().ok())
-        .ok_or_else(|| {
-            io::Error::new(ErrorKind::InvalidData, "missing or invalid target header")
-        })?;
+    let port: u16 = extract_hdr(request.headers(), HDR_PORT)?;
 
     if !reverse_ports_whitelist.contains(&port) {
         tracing::warn!("Unauthorized reverse stream for port {port}");

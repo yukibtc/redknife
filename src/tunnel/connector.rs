@@ -16,8 +16,8 @@ use tokio_rustls::rustls::ClientConnection;
 use tokio_rustls::rustls::pki_types::ServerName;
 
 use super::{
-    ALPN, DIAL_PATH, HDR_AUTHORIZATION, HDR_PORT, OPDIAL_PATH, TunnelTlsFingerprint, bridge, dial,
-    extract_hdr_target, h2_to_io_err, resolve_target, tls,
+    ALPN, DIAL_PATH, HDR_AUTHORIZATION, HDR_PORT, HDR_TARGET, OPDIAL_PATH, TunnelTlsFingerprint,
+    bridge, dial, extract_hdr, h2_to_io_err, resolve_target, tls,
 };
 use crate::host_and_port::HostAndPort;
 
@@ -190,7 +190,7 @@ async fn worker(mut sender: SendRequest<Bytes>, token: Arc<str>) -> io::Result<(
             ));
         }
 
-        let target: HostAndPort = match extract_hdr_target(response.headers()) {
+        let target: HostAndPort = match extract_hdr(response.headers(), HDR_TARGET) {
             Ok(target) => target,
             Err(e) => {
                 tracing::warn!("{e}");
